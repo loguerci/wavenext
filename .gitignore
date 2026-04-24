@@ -1,0 +1,6 @@
+__pycache__
+*.csv
+logs
+data
+utils/__pycache__
+models/__pycache__

@@ -1,0 +1,24 @@
+# Config file for training WaveNeXt model
+
+duration: 10
+
+# Model hyperparameters
+sample_rate: 48000 
+#sample_rate: 24000
+fft_dim: 2048
+#fft_dim: 1024
+shift_dim: 512
+#shift_dim: 256
+n_mels: 80
+
+# Training hyperparameters
+batch_size: 2
+num_epochs: 1
+learning_rate: 1e-4
+log_dir: "logs/wavenext"
+
+accelerator: "cpu"
+devices: 1
+
+train_csv: "libritts_dataset.csv"
+
