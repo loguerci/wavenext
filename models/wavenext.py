@@ -23,20 +23,22 @@ def load_config(config_path):
 
 
 class WaveNeXt(pl.LightningModule):
-    def __init__(self, sample_rate=24000, fft_dim=1024, shift_dim=256, n_mels=80):
+    def __init__(self, dim=512, sample_rate=24000, fft_dim=1024, shift_dim=256, n_mels=80, k=2):
         super().__init__()
 
         self.sample_rate = sample_rate
         self.fft_dim = fft_dim
         self.shift_dim = shift_dim
         self.n_mels = n_mels
+        self.k = k
+        self.dim = dim
 
         # Model components
         self.generator = Generator(
             in_channels=self.n_mels,
-            fft_dim=self.fft_dim,
+            dim=self.dim,
             shift_dim=self.shift_dim,
-            inter_channels=128,
+            inter_channels=self.dim * self.k,
             num_blocks=8)
         
         self.discriminator_mpd = MPD()
@@ -92,7 +94,7 @@ class WaveNeXt(pl.LightningModule):
         d_loss_mrd = self.adversarial_loss.discriminator_loss(real_out_mrd, fake_out_mrd)
         total_d_loss = d_loss_mpd + self.w_mrd * d_loss_mrd
 
-        self.log('d_loss', total_d_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('d_loss', total_d_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         total_d_loss.backward()        
         optimizer_d.step()
 
@@ -124,7 +126,7 @@ class WaveNeXt(pl.LightningModule):
         g_loss_fm = g_loss_fm_mpd + self.w_mrd * g_loss_fm_mrd
         total_g_loss = g_loss_adv + self.w_mel * g_loss_recon + g_loss_fm
 
-        self.log('g_loss', total_g_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('g_loss', total_g_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         total_g_loss.backward()
         optimizer_g.step()
      
@@ -136,9 +138,9 @@ class WaveNeXt(pl.LightningModule):
 
         config = load_config('config.yaml')
 
-        optimizer_g = optim.AdamW(self.generator.parameters(), lr=1e-4, betas=(0.9, 0.999))
+        optimizer_g = optim.AdamW(self.generator.parameters(), lr=2e-4, betas=(0.9, 0.999))
         optimizer_d = optim.AdamW(list(self.discriminator_mpd.parameters())
-                                   + list(self.discriminator_mrd.parameters()), lr=1e-4, betas=(0.9, 0.999))
+                                   + list(self.discriminator_mrd.parameters()), lr=2e-4, betas=(0.9, 0.999))
         
         scheduler_g = optim.lr_scheduler.CosineAnnealingLR(optimizer_g, T_max=config['num_epochs'])
         scheduler_d = optim.lr_scheduler.CosineAnnealingLR(optimizer_d, T_max=config['num_epochs'])

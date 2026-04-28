@@ -12,6 +12,7 @@ from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 import torchaudio
 from utils.mel import MelSpectra
+import random
 
 class MockDataset(Dataset):
     """
@@ -37,6 +38,7 @@ class WaveNeXtDataset(Dataset):
                 self.file_paths.append(line.strip())
         self.sample_rate = sample_rate
         self.duration = duration
+        self.segment_length = self.sample_rate * self.duration
 
     def __len__(self):
         return len(self.file_paths)
@@ -57,6 +59,10 @@ class WaveNeXtDataset(Dataset):
         elif audio.size(1) < self.sample_rate * self.duration:
             pad_length = self.sample_rate * self.duration - audio.size(1)
             audio = torch.nn.functional.pad(audio, (0, pad_length))  # Pad with zeros
+
+        if audio.shape[-1] > self.segment_length:
+            start = random.randint(0, audio.shape[-1] - self.segment_length)
+            audio = audio[..., start:start + self.segment_length]
             
         return audio
 
@@ -65,7 +71,7 @@ class WaveNeXtDataset(Dataset):
 if "__main__" == __name__:
 
     #dataset = MockDataset(num_samples=10, sample_length=24000*5)
-    dataset = WaveNeXtDataset(path_csv="libritts_dataset.csv", sample_rate=24000, duration=10)
+    dataset = WaveNeXtDataset(path_csv="libritts_dataset.csv", sample_rate=24000, duration=1)
     print(f"Dataset length: {len(dataset)}")
 
     dataloader = DataLoader(dataset, batch_size=2, shuffle=True)
