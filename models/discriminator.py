@@ -25,7 +25,7 @@ class MPD(nn.Module):
     Multi-Period waveform Discriminator (MPD) from HiFi-GAN
     arguments:
     - periods = [2, 3, 5, 7, 11] : list of periods to reshape the input audio for each sub-discriminator.
-    - discriminators : list of sub-discriminators, each taking input of shape (B, 1, T//period, period) and outputting a score of shape (B, 1, T//period).
+    - discriminators : list of sub-discriminators, each taking input of shape (B, 1, T//period, period).
     
     """
     def __init__(self, periods=[2, 3, 5, 7, 11]):
@@ -66,6 +66,7 @@ class OnePeriod(nn.Module):
         self.leaky_relu = nn.LeakyReLU(0.1)
 
     def forward(self, x):
+        #print(f"Input shape to OnePeriod (period={self.period}): {x.shape}")
         fmap = []
         for conv in self.conv:
             x = conv(x)
@@ -82,8 +83,7 @@ class MRD(nn.Module):
     - fft_sizes = [2048, 1024, 512] : list of FFT sizes for the spectrogram input to each sub-discriminator
     - hop_lenghts = [240, 120, 50] : list of hop lengths for the spectrogram input to each sub-discriminator
     - win_lengths = [1200, 600, 240] : list of window lengths for the spectrogram input to each sub-discriminator
-    - discriminators : list of sub-discriminators, each taking input of shape (B, 1, F, T) and outputting a score of shape (B, 1, F//2, T//2)
-
+    - discriminators : list of sub-discriminators, each taking input of shape (B, 1, F, T).
     """
     def __init__(self, 
                  fft_sizes=[2048, 1024, 512],
@@ -139,7 +139,7 @@ class OneResolution(nn.Module):
         return fmap, x
     
 if "__main__" == __name__:
-    x = torch.randn(1, 1, 48000*5)
+    x = torch.randn(1, 1, 24000*1)
 
     model = MPD()
     fmaps, out = model(x)

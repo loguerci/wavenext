@@ -11,7 +11,6 @@ sample_rate: 24000
 fft_dim: 1024
 
 dim: 512
-
 #shift_dim: 512
 shift_dim: 256
 n_mels: 80
@@ -20,12 +19,12 @@ k: 3
 # Training hyperparameters
 batch_size: 8
 num_workers: 4
-num_epochs: 2
-learning_rate: 1e-4
-log_dir: "logs/wavenext"
+num_epochs: 1000
+learning_rate: 0.0002
+log_dir: "logs"
 
 accelerator: "cuda"
-devices: 2
+devices: 1
 
-train_csv: "libritts_dataset.csv"
-
+train_csv: "libritts_train.csv"
+val_csv: "libritts_val.csv"

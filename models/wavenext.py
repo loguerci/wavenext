@@ -23,7 +23,7 @@ def load_config(config_path):
 
 
 class WaveNeXt(pl.LightningModule):
-    def __init__(self, dim=512, sample_rate=24000, fft_dim=1024, shift_dim=256, n_mels=80, k=2):
+    def __init__(self, dim=512, sample_rate=24000, fft_dim=1024, shift_dim=256, n_mels=80, k=2, lr=2e-4):
         super().__init__()
 
         self.sample_rate = sample_rate
@@ -32,6 +32,7 @@ class WaveNeXt(pl.LightningModule):
         self.n_mels = n_mels
         self.k = k
         self.dim = dim
+        self.lr = lr
 
         # Model components
         self.generator = Generator(
@@ -132,15 +133,27 @@ class WaveNeXt(pl.LightningModule):
      
 
     def validation_step(self, batch):
-        pass
+        x = batch
+        sequence_length = x.size(2)
+
+        with torch.no_grad():
+            mel = self.mel_extractor(x)
+            mel.squeeze_(1)
+            fake = self.generator(mel)[..., :sequence_length].unsqueeze(1)
+
+        # Just log some metrics, no backward
+        fake_mel = self.mel_extractor(fake)
+        fake_mel.squeeze_(1)
+        mel_loss = self.reconstruction_loss(fake_mel, mel)
+        self.log('val_mel_loss', mel_loss, on_epoch=True, prog_bar=True, sync_dist=True)
 
     def configure_optimizers(self):
 
         config = load_config('config.yaml')
 
-        optimizer_g = optim.AdamW(self.generator.parameters(), lr=2e-4, betas=(0.9, 0.999))
+        optimizer_g = optim.AdamW(self.generator.parameters(), lr=self.lr, betas=(0.9, 0.999))
         optimizer_d = optim.AdamW(list(self.discriminator_mpd.parameters())
-                                   + list(self.discriminator_mrd.parameters()), lr=2e-4, betas=(0.9, 0.999))
+                                   + list(self.discriminator_mrd.parameters()), lr=self.lr, betas=(0.9, 0.999))
         
         scheduler_g = optim.lr_scheduler.CosineAnnealingLR(optimizer_g, T_max=config['num_epochs'])
         scheduler_d = optim.lr_scheduler.CosineAnnealingLR(optimizer_d, T_max=config['num_epochs'])
