@@ -33,7 +33,7 @@ def load_config(config_path):
 def main(hparams):
 
     now = datetime.now() 
-    formatted = now.strftime("%d-%m-%Y_%H_h")
+    formatted = now.strftime("%d-%m_at_%H_%M_%S")
 
     torch.set_float32_matmul_precision('high')
     config = load_config(hparams.config_path)

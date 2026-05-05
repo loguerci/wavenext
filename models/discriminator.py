@@ -121,8 +121,7 @@ class OneResolution(nn.Module):
             weight_norm(nn.Conv2d(32, 32, (3, 9), (1, 2), padding=(1, 4))),
             weight_norm(nn.Conv2d(32, 32, (3, 9), (1, 2), padding=(1, 4))),
             weight_norm(nn.Conv2d(32, 32, (3, 9), (1, 2), padding=(1, 4))),
-            weight_norm(nn.Conv2d(32, 32, (3, 9), (1, 2), padding=(1, 4))),
-            weight_norm(nn.Conv2d(32, 32, (3, 9), (1, 1), padding=(1, 1)))
+            weight_norm(nn.Conv2d(32, 32, (3, 3), (1, 1), padding=(1, 1)))
         ])
         self.conv2 = weight_norm(nn.Conv2d(32, 1, 3, 1, 1))
         self.leaky_relu = nn.LeakyReLU(0.2)

@@ -31,39 +31,37 @@ class MockDataset(Dataset):
         return audio
 
 class WaveNeXtDataset(Dataset):
-    def __init__(self, path_csv, sample_rate=24000, duration=5):
+    def __init__(self, path_csv, sample_rate=24000, duration=1, segments_per_file=1):
         self.file_paths = []
         with open(path_csv, 'r') as f:
             for line in f:
                 self.file_paths.append(line.strip())
         self.sample_rate = sample_rate
-        self.duration = duration
-        self.segment_length = self.sample_rate * self.duration
+        self.segment_length = sample_rate * duration
+        self.segments_per_file = segments_per_file
 
     def __len__(self):
-        return len(self.file_paths)
-    
+        return len(self.file_paths) * self.segments_per_file
+
     def __getitem__(self, idx):
-        file_path = self.file_paths[idx]
+        file_idx = idx % len(self.file_paths) 
+        file_path = self.file_paths[file_idx]
+        
         audio, sr = torchaudio.load(file_path)
 
         if audio.size(0) > 1:
-            audio = torch.mean(audio, dim=0, keepdim=True)  # Convert to mono
+            audio = torch.mean(audio, dim=0, keepdim=True)
         if sr != self.sample_rate:
             resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=self.sample_rate)
             audio = resampler(audio)
 
-        if audio.size(1) > self.sample_rate * self.duration:
-            audio = audio[:, :self.sample_rate * self.duration]  # Truncate to desired duration
+        if audio.size(1) >= self.segment_length:
+            start = random.randint(0, audio.size(1) - self.segment_length)
+            audio = audio[:, start:start + self.segment_length]
+        else:
+            pad_length = self.segment_length - audio.size(1)
+            audio = torch.nn.functional.pad(audio, (0, pad_length))
 
-        elif audio.size(1) < self.sample_rate * self.duration:
-            pad_length = self.sample_rate * self.duration - audio.size(1)
-            audio = torch.nn.functional.pad(audio, (0, pad_length))  # Pad with zeros
-
-        if audio.shape[-1] > self.segment_length:
-            start = random.randint(0, audio.shape[-1] - self.segment_length)
-            audio = audio[..., start:start + self.segment_length]
-            
         return audio
 
 

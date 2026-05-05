@@ -4,4 +4,5 @@ logs
 data
 utils/__pycache__
 models/__pycache__
+eval/espnet
 checkpoints

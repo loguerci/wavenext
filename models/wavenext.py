@@ -78,17 +78,14 @@ class WaveNeXt(pl.LightningModule):
 
         # Discriminator step
         optimizer_d.zero_grad()
-        
-        with torch.no_grad():
-            fake = fake[:, :, :sequence_length]  # Ensure fake has the same length as real
+
+        fake = fake[:, :, :sequence_length]  # Ensure fake has the same length as real
+        fake_detached = fake.detach()  # Detach fake from the generator graph for discriminator update
 
         real_fmaps_mpd, real_out_mpd = self.discriminator_mpd(x)
         real_fmaps_mrd, real_out_mrd = self.discriminator_mrd(x)
-        fake_fmaps_mpd, fake_out_mpd = self.discriminator_mpd(fake)
-        fake_fmaps_mrd, fake_out_mrd = self.discriminator_mrd(fake)
-
-        fake_fmaps_mpd = [[f.detach() for f in fmaps] for fmaps in fake_fmaps_mpd]
-        fake_fmaps_mrd = [fmap.detach() for fmap in fake_fmaps_mrd]
+        fake_fmaps_mpd, fake_out_mpd = self.discriminator_mpd(fake_detached)
+        fake_fmaps_mrd, fake_out_mrd = self.discriminator_mrd(fake_detached)
 
         # Compute Losses
         d_loss_mpd = self.adversarial_loss.discriminator_loss(real_out_mpd, fake_out_mpd)
@@ -101,10 +98,6 @@ class WaveNeXt(pl.LightningModule):
 
         # Generator step
         optimizer_g.zero_grad()
-
-        fake = self.generator(mel)  # Regenerate fake for generator step
-        fake = fake.unsqueeze(1)  
-        fake = fake[:, :, :sequence_length]  
 
         # Compute Losses
 
@@ -147,6 +140,9 @@ class WaveNeXt(pl.LightningModule):
         mel_loss = self.reconstruction_loss(fake_mel, mel)
         self.log('val_mel_loss', mel_loss, on_epoch=True, prog_bar=True, sync_dist=True)
 
+    def test_step(self, batch):
+        pass
+
     def configure_optimizers(self):
 
         config = load_config('config.yaml')
@@ -157,6 +153,8 @@ class WaveNeXt(pl.LightningModule):
         
         scheduler_g = optim.lr_scheduler.CosineAnnealingLR(optimizer_g, T_max=config['num_epochs'])
         scheduler_d = optim.lr_scheduler.CosineAnnealingLR(optimizer_d, T_max=config['num_epochs'])
+        self.log('lr_g', scheduler_g.get_last_lr()[0], on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+        self.log('lr_d', scheduler_d.get_last_lr()[0], on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         
 
         return [optimizer_g, optimizer_d], [scheduler_g, scheduler_d]
