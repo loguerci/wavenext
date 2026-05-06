@@ -36,7 +36,7 @@ class Generator(nn.Module):
     
 if "__main__" == __name__: # run python -m wavenext.models.generator 
 
-    x = torch.randn(2, 1, 48000*5)
+    x = torch.randn(2, 1, 24000)
     mel_extractor = MelSpectra()
     mel = mel_extractor(x)
     mel.squeeze_(1) 

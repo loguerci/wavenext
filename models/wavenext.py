@@ -6,12 +6,15 @@ Author : Loïs Guerci
 
 import torch
 import torch.optim as optim
+import torchaudio
 import yaml
+import os
 
 from utils.mel import MelSpectra
 from .generator import Generator
 from .discriminator import MPD, MRD
 from utils.loss import ReconstructionLoss, AdversarialLoss, FeatureMatchingLoss
+from torch.utils.tensorboard import SummaryWriter
 
 #from dataloader import AudioDataset
 import pytorch_lightning as pl
@@ -152,9 +155,45 @@ class WaveNeXt(pl.LightningModule):
                                    + list(self.discriminator_mrd.parameters()), lr=self.lr, betas=(0.9, 0.999))
         
         scheduler_g = optim.lr_scheduler.CosineAnnealingLR(optimizer_g, T_max=config['num_epochs'])
-        scheduler_d = optim.lr_scheduler.CosineAnnealingLR(optimizer_d, T_max=config['num_epochs'])
-        self.log('lr_g', scheduler_g.get_last_lr()[0], on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
-        self.log('lr_d', scheduler_d.get_last_lr()[0], on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
-        
+        scheduler_d = optim.lr_scheduler.CosineAnnealingLR(optimizer_d, T_max=config['num_epochs'])     
 
         return [optimizer_g, optimizer_d], [scheduler_g, scheduler_d]
+    
+
+class audio_log(pl.Callback):
+    def __init__(self, dataset, every_n_epochs=20, num_samples=4, sample_rate=24000):
+        super().__init__()
+        self.every_n_epochs = every_n_epochs
+        self.num_samples = num_samples
+        self.dataset = dataset
+        self.sample_rate = sample_rate
+
+        self.mel_extractor = MelSpectra(sample_rate=sample_rate, n_fft=1024, hop_length=256, n_mels=80)
+
+    def on_validation_epoch_end(self, trainer, pl_module):
+        epoch = trainer.current_epoch
+
+        if epoch % self.every_n_epochs != 0:
+            return
+        
+        path_dir = os.path.join(trainer.logger.log_dir, f'audio_epoch_{epoch}')
+        os.makedirs(path_dir, exist_ok=True)
+
+        pl_module.eval()
+        with torch.no_grad():
+            for i in range(self.num_samples):
+                mel = self.mel_extractor(self.dataset[i])
+                mel.squeeze_(1)
+                fake = self.generator(mel)[..., :self.dataset[i].size(2)].unsqueeze(1)
+                
+                torchaudio.save(
+                    os.path.join(path_dir, f'sample_{i}_fake.wav'),
+                    fake.squeeze(0).cpu(),
+                    self.sample_rate
+                )
+                torchaudio.save(
+                    os.path.join(path_dir, f'sample_{i}_real.wav'),
+                    self.dataset[i].squeeze(0).cpu(),
+                    self.sample_rate
+                )
+        pl_module.train()
