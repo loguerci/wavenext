@@ -72,7 +72,7 @@ def main(hparams):
                       logger=logger,
                       callbacks=[ModelSummary(max_depth=2), checkpoint_callback, audio])
     
-    resume_ckpt = '/home/lois/wavenext/checkpoints/04-05_at_13_25_19/wavenext-epoch=312-val_mel_loss=2.84.ckpt'
+    resume_ckpt = '/home/lois/wavenext/checkpoints/06-05_at_15_04_31/wavenext-epoch=449-val_mel_loss=2.61.ckpt'
 
     trainer.fit(model, train_loader, val_loader, ckpt_path=resume_ckpt if config['resume'] else None)
 
