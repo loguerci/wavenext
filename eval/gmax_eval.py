@@ -61,7 +61,7 @@ def average_results(results_list):
 
 # Initialize backends 
 _aes_predictor = AesPredictor(checkpoint_pth=None, precision='bf16', sample_rate=sample_rate)
-_aes_predictor.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+_aes_predictor.device = 'cuda'
 _aes_predictor.setup_model()
 
 def aesthetics_backend(audio, sr):
@@ -87,8 +87,8 @@ class GMAXEvaluator:
 
         # - reference free :
         self.audiobox_aesthetics_metric = AudioboxAestheticsMetric(backend=aesthetics_backend, sample_rate=sample_rate, target_sr=sample_rate)
-        self.mmos = MMMOSMetric(axis='overall', predictor=None, sample_rate=sample_rate, target_sr=sample_rate)
-        self.zimtohrli_metric = ZimtohrliMetric(sample_rate=sample_rate, target_sr=sample_rate)
+        #self.mmos = MMMOSMetric(axis='overall', predictor=None, sample_rate=sample_rate, target_sr=sample_rate)
+        #self.zimtohrli_metric = ZimtohrliMetric(sample_rate=sample_rate, target_sr=sample_rate)
 
         # - reference based :
         self.multiscale_stft_metric = MultiScaleSTFTMetric(scales=[512, 256, 128], overlap=0.5)
@@ -97,7 +97,7 @@ class GMAXEvaluator:
         # Target-domain match metrics :
 
         self.kernel_audio_distance = KernelAudioDistance(model='clap-2023', pre_compute=False, sample_rate=sample_rate)
-        self.instrument_subset_fad = InstrumentSubsetFADMetric(label_key='instrument', label_value='piano', embedding_model='clap-2023', min_samples=4)
+        #self.instrument_subset_fad = InstrumentSubsetFADMetric(label_key='instrument', label_value='piano', embedding_model='clap-2023', min_samples=4)
         self.density_and_coverage = DensityAndCoverage(nearest_k=1, compute_pr=True)
 
         # Source-content preservation metrics :
@@ -112,7 +112,6 @@ class GMAXEvaluator:
         self.mel_extractor = MelSpectra(sample_rate=sample_rate, n_fft=1024, hop_length=256, n_mels=80).to(self.device)
 
         # Models :
-
         self.model = WaveNeXt().to(self.device)
         self.model.load_state_dict(torch.load("/home/lois/wavenext/checkpoints/07-05_at_03_56_57/wavenext-epoch=453-val_mel_loss=1.89.ckpt")['state_dict'])
         self.model.eval()
@@ -120,8 +119,8 @@ class GMAXEvaluator:
     def evaluate(self, deg, ref):
         results = {}
 
-        #results['audiobox_aesthetics'] = self.audiobox_aesthetics_metric(deg.detach().cpu())
-        aes_scores = aesthetics_backend(deg, sample_rate)
+        #results['audiobox_aesthetics'] = self.audiobox_aesthetics_metric(deg.detach())
+        aes_scores = aesthetics_backend(deg.detach(), sample_rate)
         results['audiobox_CE'] = aes_scores['CE']
         results['audiobox_CU'] = aes_scores['CU']
         results['audiobox_PC'] = aes_scores['PC']
@@ -189,6 +188,7 @@ if __name__ == "__main__":
             
     generated_audio = torch.cat(gen, dim=0)
     reference_audio = torch.cat(ref, dim=0)
+    noise = torch.cat(ran, dim=0)
     
     table = Table(title="Evaluation Results")
     table.add_column("Metric", justify="left", style="cyan", no_wrap=True)
