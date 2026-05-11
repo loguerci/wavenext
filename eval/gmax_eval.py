@@ -8,9 +8,9 @@ Evaluation script using Gmax repository by Philippe Esling for several baselines
 - Noise (white noise)
 
 Made to evaluate timbre transfer performance with metrics categorized in 3 groups :
-- Audio quality : Audiobox Aesthetics, MMMOS, DeePAQScorer
-- Target-domain match : Kernel Audio Distance, FAD
-- Source-content preservation : F0 stabilithy, Raw Pitch Accuracy, Raw Chroma Accuracy, Cents RMSE, Voicing Recall, Structure Metric
+- Audio quality : Audiobox Aesthetics, MMMOS, DeePAQScorer, ViSQOL, Multi-Scale STFT Distance, Zimtohrli
+- Target-domain match : Kernel Audio Distance, FAD, Density and Coverage
+- Source-content preservation : F0 stability, Raw Pitch Accuracy, Raw Chroma Accuracy, Cents RMSE, Voicing Recall, Structure Metric
 
 Author: Loïs Guerci
 """
@@ -18,9 +18,13 @@ Author: Loïs Guerci
 import math
 import os
 import sys
+from librosa import to_mono
 import tqdm
 import yaml
 import tempfile
+from rich import print
+from rich.console import Console
+from rich.table import Table
 
 sys.path.insert(0, '/home/lois/models_benchmark/')
 sys.path.insert(0, '/home/lois/wavenext/')
@@ -38,37 +42,42 @@ from audio import FADMetric, MultiScaleSTFTMetric, ZimtohrliMetric, ViSQOLMetric
 from features import F0StabilityMetric, RawPitchAccuracyMetric, RawChromaAccuracyMetric, CentsRMSEMetric, ChromaConsistencyMetric, VoicingRecallMetric, StructureMetric
 from distribution import KernelAudioDistance, InstrumentSubsetFADMetric, DensityAndCoverage
 from audiobox_aesthetics.infer import AesPredictor
+from audio.utils import _to_numpy
 
 # Models :
 from models.wavenext import WaveNeXt
 
-# Initialize backends 
-_aes_predictor = AesPredictor(checkpoint_pth=None, precision='bf16', sample_rate=24000)
-_aes_predictor.setup_model()
 
 sample_rate = 24000
-
-def aesthetics_backend(audio, sr):
-    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
-        tmp_path = f.name
-    
-    audio_tensor = torch.from_numpy(audio).float().unsqueeze(0)
-    torchaudio.save(tmp_path, audio_tensor, sr)
-    
-    batch = [{'path': tmp_path}]
-    with torch.no_grad():
-        scores = _aes_predictor.forward(batch)
-    
-    #print("Aesthetics scores:", scores[0]['CE'], scores[0]['CU'], scores[0]['PC'], scores[0]['PQ'])
-    
-    os.remove(tmp_path)
-    return float(np.mean([scores[0][k] for k in ['CE', 'CU', 'PC', 'PQ']]))
-
 
 def load_config(config_path):
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
     return config
+
+def average_results(results_list):
+    keys = results_list[0].keys()
+    return {k: np.mean([r[k] for r in results_list]) for k in keys}
+
+# Initialize backends 
+_aes_predictor = AesPredictor(checkpoint_pth=None, precision='bf16', sample_rate=sample_rate)
+_aes_predictor.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+_aes_predictor.setup_model()
+
+def aesthetics_backend(audio, sr):
+    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
+        tmp_path = f.name
+    
+    #audio_tensor = torch.from_numpy(audio).float().unsqueeze(0)
+    torchaudio.save(tmp_path, audio.cpu(), sr)
+    
+    batch = [{'path': tmp_path}]
+    with torch.no_grad():
+        scores = _aes_predictor.forward(batch)
+    
+    os.remove(tmp_path)
+    return scores[0]
+
 
 class GMAXEvaluator:
     def __init__(self, device='cuda'):
@@ -111,10 +120,14 @@ class GMAXEvaluator:
     def evaluate(self, deg, ref):
         results = {}
 
-        results['audiobox_aesthetics'] = self.audiobox_aesthetics_metric(deg.detach().cpu())
-        #results['zimtohrli'] = self.zimtohrli_metric(deg.detach().cpu(), ref.detach().cpu())
-        results['multiscale_stft'] = self.multiscale_stft_metric(deg.detach().cpu(), ref.detach().cpu())
-        results['visqol'] = self.visqol_metric(deg.detach().cpu(), ref.detach().cpu())
+        #results['audiobox_aesthetics'] = self.audiobox_aesthetics_metric(deg.detach().cpu())
+        aes_scores = aesthetics_backend(deg, sample_rate)
+        results['audiobox_CE'] = aes_scores['CE']
+        results['audiobox_CU'] = aes_scores['CU']
+        results['audiobox_PC'] = aes_scores['PC']
+        results['audiobox_PQ'] = aes_scores['PQ']
+        results['multiscale_stft'] = self.multiscale_stft_metric(deg, ref)
+        results['visqol'] = self.visqol_metric(deg, ref)
 
         results['kernel_audio_distance'] = self.kernel_audio_distance(deg, ref)
 
@@ -129,10 +142,6 @@ class GMAXEvaluator:
     
 
 if __name__ == "__main__":
-    
-    def average_results(results_list):
-        keys = results_list[0].keys()
-        return {k: np.mean([r[k] for r in results_list]) for k in keys}
 
     config = load_config('/home/lois/wavenext/config.yaml')
 
@@ -176,14 +185,28 @@ if __name__ == "__main__":
 
             gen.append(generated_audio)
             ref.append(reference_audio)
+            ran.append(noise)
             
     generated_audio = torch.cat(gen, dim=0)
     reference_audio = torch.cat(ref, dim=0)
-        
-    print("results:", average_results(total_results))
-    print("noise_results:", average_results(total_noise_results))
-    print("identity_results:", average_results(total_identity_results))
+    
+    table = Table(title="Evaluation Results")
+    table.add_column("Metric", justify="left", style="cyan", no_wrap=True)
+    table.add_column("WaveNeXt", justify="right", style="magenta")
+    table.add_column("Random", justify="right", style="red")
+    table.add_column("Identity", justify="right", style="green")    
 
-    dataset_results = {'density_and_coverage': evaluator.density_and_coverage(generated_audio, reference_audio)}
+    for key in total_results[0].keys():
+        table.add_row(key, f"{average_results(total_results)[key]:.4f}", f"{average_results(total_noise_results)[key]:.4f}", f"{average_results(total_identity_results)[key]:.4f}")
 
-    print("dataset metrics:", dataset_results)
+
+    dataset_results = evaluator.density_and_coverage(generated_audio, reference_audio)
+    dataset_noise_results = evaluator.density_and_coverage(noise, reference_audio)
+    dataset_identity_results = evaluator.density_and_coverage(reference_audio, reference_audio)
+    table.add_row("Density and Coverage"
+                  , f"Density: {dataset_results[0]:.4f}, Coverage: {dataset_results[1]:.4f}, Precision: {dataset_results[2]:.4f}, Recall: {dataset_results[3]:.4f}"
+                  , f"Density: {dataset_noise_results[0]:.4f}, Coverage: {dataset_noise_results[1]:.4f}, Precision: {dataset_noise_results[2]:.4f}, Recall: {dataset_noise_results[3]:.4f}"
+                  , f"Density: {dataset_identity_results[0]:.4f}, Coverage: {dataset_identity_results[1]:.4f}, Precision: {dataset_identity_results[2]:.4f}, Recall: {dataset_identity_results[3]:.4f}"
+    )
+    console = Console()
+    console.print(table)
