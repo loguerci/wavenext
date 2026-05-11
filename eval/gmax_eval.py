@@ -19,6 +19,8 @@ import math
 import os
 import sys
 import tqdm
+import yaml
+import tempfile
 
 sys.path.insert(0, '/home/lois/models_benchmark/')
 sys.path.insert(0, '/home/lois/wavenext/')
@@ -26,25 +28,25 @@ sys.path.insert(0, '/home/lois/wavenext/')
 import torchaudio
 import torch
 import numpy as np
+from torch.utils.data import DataLoader
+from dataloader import WaveNeXtDataset
+from utils.mel import MelSpectra
 
 from testing import *
 from quality import AudioboxAestheticsMetric, MMMOSMetric, DeePAQScorer
-from audio import FADMetric, MelSpectrogramMetric  
-from features import F0StabilityMetric, RawPitchAccuracyMetric, RawChromaAccuracyMetric, CentsRMSEMetric, VoicingRecallMetric, StructureMetric
-from distribution import KernelAudioDistance, InstrumentSubsetFADMetric
+from audio import FADMetric, MultiScaleSTFTMetric, ZimtohrliMetric, ViSQOLMetric
+from features import F0StabilityMetric, RawPitchAccuracyMetric, RawChromaAccuracyMetric, CentsRMSEMetric, ChromaConsistencyMetric, VoicingRecallMetric, StructureMetric
+from distribution import KernelAudioDistance, InstrumentSubsetFADMetric, DensityAndCoverage
+from audiobox_aesthetics.infer import AesPredictor
 
+# Models :
 from models.wavenext import WaveNeXt
-from utils.mel import MelSpectra
-from torch.utils.data import DataLoader
-from dataloader import WaveNeXtDataset
-import yaml
-from audiobox_aesthetics.infer import AesPredictor, make_inference_batch
-import tempfile
-import soundfile as sf
 
 # Initialize backends 
 _aes_predictor = AesPredictor(checkpoint_pth=None, precision='bf16', sample_rate=24000)
 _aes_predictor.setup_model()
+
+sample_rate = 24000
 
 def aesthetics_backend(audio, sr):
     with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
@@ -57,14 +59,11 @@ def aesthetics_backend(audio, sr):
     with torch.no_grad():
         scores = _aes_predictor.forward(batch)
     
+    #print("Aesthetics scores:", scores[0]['CE'], scores[0]['CU'], scores[0]['PC'], scores[0]['PQ'])
+    
     os.remove(tmp_path)
     return float(np.mean([scores[0][k] for k in ['CE', 'CU', 'PC', 'PQ']]))
 
-def mmmos_backend(audio, sr):
-    # placeholder until real MMMOS is available
-    rms = float(np.sqrt(np.mean(audio.astype(np.float32) ** 2)))
-    overall = float(np.clip(rms * 50, 1.0, 5.0))
-    return {'overall': overall}
 
 def load_config(config_path):
     with open(config_path, 'r') as f:
@@ -77,24 +76,31 @@ class GMAXEvaluator:
         # -----------------------------------------------------------------
         # Audio quality metrics :
 
-        self.audiobox_aesthetics_metric = AudioboxAestheticsMetric(backend=aesthetics_backend, sample_rate=24000, target_sr=24000)
-        self.mmos = MMMOSMetric(axis='overall', predictor=mmmos_backend, sample_rate=24000, target_sr=24000)
-        #self.deepaq_scorer = DeePAQScorer(...)
+        # - reference free :
+        self.audiobox_aesthetics_metric = AudioboxAestheticsMetric(backend=aesthetics_backend, sample_rate=sample_rate, target_sr=sample_rate)
+        self.mmos = MMMOSMetric(axis='overall', predictor=None, sample_rate=sample_rate, target_sr=sample_rate)
+        self.zimtohrli_metric = ZimtohrliMetric(sample_rate=sample_rate, target_sr=sample_rate)
+
+        # - reference based :
+        self.multiscale_stft_metric = MultiScaleSTFTMetric(scales=[512, 256, 128], overlap=0.5)
+        self.visqol_metric = ViSQOLMetric(sample_rate=sample_rate)
 
         # Target-domain match metrics :
 
-        self.kernel_audio_distance = KernelAudioDistance(model='clap-2023', pre_compute=False, sample_rate=24000)
+        self.kernel_audio_distance = KernelAudioDistance(model='clap-2023', pre_compute=False, sample_rate=sample_rate)
         self.instrument_subset_fad = InstrumentSubsetFADMetric(label_key='instrument', label_value='piano', embedding_model='clap-2023', min_samples=4)
+        self.density_and_coverage = DensityAndCoverage(nearest_k=1, compute_pr=True)
 
         # Source-content preservation metrics :
-        self.mel_spectrogram_metric = MelSpectrogramMetric()
-        self.f0_stability_metric = F0StabilityMetric(sample_rate=24000)
-        self.raw_pitch_accuracy_metric = RawPitchAccuracyMetric(sample_rate=24000)
-        self.raw_chroma_accuracy_metric = RawChromaAccuracyMetric(sample_rate=24000)
-        self.cents_rms_error_metric = CentsRMSEMetric(sample_rate=24000)
+        self.f0_stability_metric = F0StabilityMetric(sample_rate=sample_rate)
+        self.raw_pitch_accuracy_metric = RawPitchAccuracyMetric(sample_rate=sample_rate)
+        self.raw_chroma_accuracy_metric = RawChromaAccuracyMetric(sample_rate=sample_rate)
+        self.cents_rms_error_metric = CentsRMSEMetric(sample_rate=sample_rate)
+        self.chroma_consistency_metric = ChromaConsistencyMetric(sample_rate=sample_rate)
+        self.voicing_recall_metric = VoicingRecallMetric(sample_rate=sample_rate)
         # -----------------------------------------------------------------
 
-        self.mel_extractor = MelSpectra(sample_rate=24000, n_fft=1024, hop_length=256, n_mels=80).to(self.device)
+        self.mel_extractor = MelSpectra(sample_rate=sample_rate, n_fft=1024, hop_length=256, n_mels=80).to(self.device)
 
         # Models :
 
@@ -106,10 +112,19 @@ class GMAXEvaluator:
         results = {}
 
         results['audiobox_aesthetics'] = self.audiobox_aesthetics_metric(deg.detach().cpu())
-        results['mmos'] = self.mmos(deg.detach().cpu())
+        #results['zimtohrli'] = self.zimtohrli_metric(deg.detach().cpu(), ref.detach().cpu())
+        results['multiscale_stft'] = self.multiscale_stft_metric(deg.detach().cpu(), ref.detach().cpu())
+        results['visqol'] = self.visqol_metric(deg.detach().cpu(), ref.detach().cpu())
 
-        results['mel_spectrogram_distance'] = self.mel_spectrogram_metric(self.mel_extractor(deg), self.mel_extractor(ref))
+        results['kernel_audio_distance'] = self.kernel_audio_distance(deg, ref)
+
         results['f0_stability'] = self.f0_stability_metric(deg, ref)
+        results['cents_rms_error'] = self.cents_rms_error_metric(deg, ref)
+        results['raw_pitch_accuracy'] = self.raw_pitch_accuracy_metric(deg, ref)
+        results['raw_chroma_accuracy'] = self.raw_chroma_accuracy_metric(deg, ref)
+        results['chroma_consistency'] = self.chroma_consistency_metric(deg, ref)
+        results['voicing_recall'] = self.voicing_recall_metric(deg, ref)
+
         return {k: v.item() if isinstance(v, torch.Tensor) else float(v) for k, v in results.items()}
     
 
@@ -128,16 +143,14 @@ if __name__ == "__main__":
 
     total_results = []
     total_noise_results = []
+    total_identity_results = []
+    gen = []
+    ref = []
+    ran = []
 
     print("Evaluating WaveNeXt :")
 
     pbar = tqdm.tqdm(test_loader)
-
-    import numpy as np
-    test_audio = np.random.randn(24000).astype(np.float32)
-    print("Testing aesthetics_backend directly:")
-    result = aesthetics_backend(test_audio, 24000)
-    print("Backend result:", result)
 
     with torch.no_grad():
         for batch in pbar:
@@ -148,17 +161,29 @@ if __name__ == "__main__":
             generated_audio = evaluator.model.generator(mel)
             generated_audio = generated_audio[..., :reference_audio.size(-1)]
 
-            #print("Generated audio shape:", generated_audio.shape)
-            #print("Reference audio shape:", reference_audio.shape)
+            noise = torch.rand_like(generated_audio)
 
-            noise = torch.randn_like(generated_audio) * 0.01 
             result = evaluator.evaluate(generated_audio, reference_audio)
             result_noise = evaluator.evaluate(noise, reference_audio)
-            
+            result_identity = evaluator.evaluate(reference_audio, reference_audio)
+
             if not math.isnan(result['f0_stability']):
                 total_results.append(result)
             if not math.isnan(result_noise['f0_stability']):
                 total_noise_results.append(result_noise)
+            if not math.isnan(result_identity['f0_stability']):
+                total_identity_results.append(result_identity)
+
+            gen.append(generated_audio)
+            ref.append(reference_audio)
+            
+    generated_audio = torch.cat(gen, dim=0)
+    reference_audio = torch.cat(ref, dim=0)
         
     print("results:", average_results(total_results))
     print("noise_results:", average_results(total_noise_results))
+    print("identity_results:", average_results(total_identity_results))
+
+    dataset_results = {'density_and_coverage': evaluator.density_and_coverage(generated_audio, reference_audio)}
+
+    print("dataset metrics:", dataset_results)

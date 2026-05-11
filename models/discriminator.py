@@ -6,7 +6,7 @@ Author : Loïs Guerci
 
 import torch
 import torch.nn as nn
-from torch.nn.utils import weight_norm, spectral_norm
+from torch.nn.utils.parametrizations import weight_norm
 from torchaudio.transforms import Spectrogram
 
 
