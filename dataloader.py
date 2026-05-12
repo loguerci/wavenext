@@ -11,6 +11,7 @@ import torch
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 import torchaudio
+import soundfile as sf
 from utils.mel import MelSpectra
 import random
 
@@ -31,36 +32,43 @@ class MockDataset(Dataset):
         return audio
 
 class WaveNeXtDataset(Dataset):
-    def __init__(self, path_csv, sample_rate=24000, duration=1, segments_per_file=1):
-        self.file_paths = []
-        with open(path_csv, 'r') as f:
-            for line in f:
-                self.file_paths.append(line.strip())
+    def __init__(self, path_csv, sample_rate=24000, duration=1):
         self.sample_rate = sample_rate
         self.segment_length = sample_rate * duration
-        self.segments_per_file = segments_per_file
+        self.segments = []  # list of (file_path, start_sample)
+
+        with open(path_csv, 'r') as f:
+            for line in f:
+                path = line.strip()
+                info = sf.info(path)
+                file_sr = info.samplerate
+                num_samples = int(info.frames * sample_rate / file_sr)
+                # Account for resampling
+                n_segments = num_samples // self.segment_length
+                for i in range(n_segments):
+                    self.segments.append((path, file_sr, i * self.segment_length))
 
     def __len__(self):
-        return len(self.file_paths) * self.segments_per_file
+        return len(self.segments)
 
     def __getitem__(self, idx):
-        file_idx = idx % len(self.file_paths) 
-        file_path = self.file_paths[file_idx]
-        
-        audio, sr = torchaudio.load(file_path)
+        path, file_sr, start = self.segments[idx]
+        # Load only the needed frames
+        start_orig = int(start * file_sr / self.sample_rate)
+        frames_orig = int(self.segment_length * file_sr / self.sample_rate)
+        audio, sr = torchaudio.load(path, frame_offset=start_orig, num_frames=frames_orig)
 
         if audio.size(0) > 1:
-            audio = torch.mean(audio, dim=0, keepdim=True)
+            audio = audio.mean(dim=0, keepdim=True)
         if sr != self.sample_rate:
             resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=self.sample_rate)
             audio = resampler(audio)
 
-        if audio.size(1) >= self.segment_length:
-            start = random.randint(0, audio.size(1) - self.segment_length)
-            audio = audio[:, start:start + self.segment_length]
+        # Ensure exact length
+        if audio.size(1) < self.segment_length:
+            audio = torch.nn.functional.pad(audio, (0, self.segment_length - audio.size(1)))
         else:
-            pad_length = self.segment_length - audio.size(1)
-            audio = torch.nn.functional.pad(audio, (0, pad_length))
+            audio = audio[:, :self.segment_length]
 
         return audio
 
@@ -68,8 +76,8 @@ class WaveNeXtDataset(Dataset):
 
 if "__main__" == __name__:
 
-    #dataset = MockDataset(num_samples=10, sample_length=24000*5)
-    dataset = WaveNeXtDataset(path_csv="libritts_dataset.csv", sample_rate=24000, duration=1)
+    print("Process LibriTTS dataset")
+    dataset = WaveNeXtDataset(path_csv="data/libritts_dataset.csv", sample_rate=24000, duration=1)
     print(f"Dataset length: {len(dataset)}")
 
     dataloader = DataLoader(dataset, batch_size=2, shuffle=True)
@@ -77,6 +85,18 @@ if "__main__" == __name__:
     print(f"Batch shape: {batch.shape}")
 
     mel_extractor = MelSpectra() 
+    mel = mel_extractor(batch)
+    mel.squeeze_(1) # (B, n_mels, T)
+    print(f"Mel shape: {mel.shape}")
+
+    print("Process Bach violin dataset")
+    dataset =  WaveNeXtDataset(path_csv="data/bach_violin_dataset.csv", sample_rate=44100, duration=1)
+    print(f"Dataset length: {len(dataset)}")
+
+    dataloader = DataLoader(dataset, batch_size=2, shuffle=True)
+    batch = next(iter(dataloader))
+    print(f"Batch shape: {batch.shape}") 
+
     mel = mel_extractor(batch)
     mel.squeeze_(1) # (B, n_mels, T)
     print(f"Mel shape: {mel.shape}")

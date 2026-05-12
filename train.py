@@ -14,7 +14,7 @@ from pytorch_lightning.callbacks import ModelSummary
 from pytorch_lightning.loggers import TensorBoardLogger
 import torch
 from pytorch_lightning.callbacks import ModelCheckpoint
-
+from torch.utils.data import random_split
 
 from models.wavenext import WaveNeXt
 from torch.utils.data import DataLoader
@@ -48,15 +48,24 @@ def main(hparams):
         lr=config['learning_rate']
     )
 
-    train_dataset = WaveNeXtDataset(path_csv=config['train_csv'], sample_rate=config['sample_rate'], duration=config['duration'])
-    val_dataset = WaveNeXtDataset(path_csv=config['val_csv'], sample_rate=config['sample_rate'], duration=config['duration'])
+    dataset = WaveNeXtDataset(path_csv=config['dataset'], sample_rate=config['sample_rate'], duration=config['duration'])
+    train_size = int(0.8 * len(dataset))
+    val_size = int(0.15 * len(dataset))
+    test_size = len(dataset) - train_size - val_size
+
+    train_dataset, val_dataset, test_dataset = random_split(
+        dataset, [train_size, val_size, test_size],
+        generator=torch.Generator().manual_seed(42)  # reproducible split
+        )
+
     train_loader = DataLoader(train_dataset, batch_size=config['batch_size'], shuffle=True, num_workers=config['num_workers'])
     val_loader = DataLoader(val_dataset, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'])
+    test_loader = DataLoader(test_dataset, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'])
 
     checkpoint_callback = ModelCheckpoint(
         monitor='val_mel_loss',
         dirpath=f'checkpoints/{formatted}',
-        filename='wavenext-{epoch:02d}-{val_mel_loss:.2f}',
+        filename='wavenext-{epoch:02d}-{val_mel_loss:.3f}',
         save_top_k=3,
         mode='min',
         every_n_epochs=1

@@ -5,7 +5,7 @@ duration: 1
 
 # Model hyperparameters
 #sample_rate: 48000 
-sample_rate: 24000
+sample_rate: 44100
 
 #fft_dim: 2048
 fft_dim: 1024
@@ -30,4 +30,6 @@ train_csv: "libritts_train.csv"
 val_csv: "libritts_val.csv"
 test_csv: "libritts_test.csv"
 
-resume: true
+dataset: "data/bach_violin_dataset.csv"
+
+resume: false

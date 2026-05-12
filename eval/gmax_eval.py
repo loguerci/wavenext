@@ -43,6 +43,7 @@ import zimtohrli as zim
 
 # Models :
 from models.wavenext import WaveNeXt
+from models.dummy_ae import DumpCodec
 
 def load_config(config_path):
     with open(config_path, 'r') as f:
@@ -93,6 +94,9 @@ class GMAXEvaluator:
         self.model.load_state_dict(torch.load("/home/lois/wavenext/checkpoints/07-05_at_03_56_57/wavenext-epoch=453-val_mel_loss=1.89.ckpt")['state_dict'])
         self.model.eval()
 
+        self.dumb = DumpCodec().to(self.device)
+        self.dumb.eval()
+
     def aesthetics_backend(self, audio, sr):
 
         batch = [{'wav': audio, 'sample_rate': sr}]
@@ -134,56 +138,69 @@ if __name__ == "__main__":
 
     total_results = []
     total_noise_results = []
+    total_db_results = []
     gen = []
     ref = []
     ran = []
+    db = []
 
-    print("Evaluating WaveNeXt :")
+    print("Evaluating WaveNeXt...")
 
     pbar = tqdm.tqdm(test_loader)
 
     with torch.no_grad():
         for batch in pbar:
             reference_audio = batch.to(evaluator.device)
-            reference_audio =reference_audio.squeeze(1)
+            reference_audio = reference_audio.squeeze(1)
             mel = evaluator.mel_extractor(reference_audio.to(evaluator.device))
             mel.squeeze_(1)
             generated_audio = evaluator.model.generator(mel)
             generated_audio = generated_audio[..., :reference_audio.size(-1)]
+            dumb_gen = evaluator.dumb(reference_audio)
+            dumb_gen.squeeze_(1)
 
             noise = torch.rand_like(generated_audio)
 
             result = evaluator.evaluate(generated_audio, reference_audio)
+            result_db = evaluator.evaluate(dumb_gen, reference_audio)
             result_noise = evaluator.evaluate(noise, reference_audio)
 
             if not math.isnan(result['f0_stability']):
                 total_results.append(result)
             if not math.isnan(result_noise['f0_stability']):
                 total_noise_results.append(result_noise)
+            if not math.isnan(result_db['f0_stability']):
+                total_db_results.append(result_db)
 
             gen.append(generated_audio)
             ref.append(reference_audio)
             ran.append(noise)
+            db.append(dumb_gen)
             
     generated_audio = torch.cat(gen, dim=0)
     reference_audio = torch.cat(ref, dim=0)
     noise = torch.cat(ran, dim=0)
+    db_audio = torch.cat(db, dim=0)
     
     table = Table(title="Evaluation Results")
     table.add_column("Metric", justify="left", style="cyan", no_wrap=True)
     table.add_column("WaveNeXt", justify="right", style="magenta")
     table.add_column("Random", justify="right", style="red")  
+    table.add_column("Dumb model", justify="right", style="yellow")  
 
     for key in total_results[0].keys():
-        table.add_row(key, f"{average_results(total_results)[key]:.4f}", f"{average_results(total_noise_results)[key]:.4f}")
+        table.add_row(key, f"{average_results(total_results)[key]:.4f}", f"{average_results(total_noise_results)[key]:.4f}", f"{average_results(total_db_results)[key]:.4f}")
 
 
     dataset_results = evaluator.density_and_coverage(generated_audio, reference_audio)
     dataset_noise_results = evaluator.density_and_coverage(noise, reference_audio)
+    dataset_db_results = evaluator.density_and_coverage(db_audio, reference_audio)
 
-    table.add_row("Density", f"{dataset_results[0]:.4f}", f"{dataset_noise_results[0]:.4f}")
-    table.add_row("Coverage", f"{dataset_results[1]:.4f}", f"{dataset_noise_results[1]:.4f}")
-    table.add_row("Precision", f"{dataset_results[2]:.4f}", f"{dataset_noise_results[2]:.4f}")
-    table.add_row("Recall", f"{dataset_results[3]:.4f}", f"{dataset_noise_results[3]:.4f}")
+    table.add_row("Density", f"{dataset_results[0]:.4f}", f"{dataset_noise_results[0]:.4f}", f"{dataset_db_results[0]:.4f}")
+    table.add_row("Coverage", f"{dataset_results[1]:.4f}", f"{dataset_noise_results[1]:.4f}", f"{dataset_db_results[1]:.4f}")
+    table.add_row("Precision", f"{dataset_results[2]:.4f}", f"{dataset_noise_results[2]:.4f}", f"{dataset_db_results[2]:.4f}")
+    table.add_row("Recall", f"{dataset_results[3]:.4f}", f"{dataset_noise_results[3]:.4f}", f"{dataset_db_results[3]:.4f}")
     console = Console()
     console.print(table)
+
+
