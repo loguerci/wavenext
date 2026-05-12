@@ -100,26 +100,14 @@ class GMAXEvaluator:
             scores = self.audiobox.forward(batch)
 
         return scores[0]
-        #return float(np.mean([scores[0][k] for k in ['CE', 'CU', 'PC', 'PQ']]))
-
-    def zimtohrli_backend(self, deg, ref, sr):
-        deg_t = torch.from_numpy(deg).float().unsqueeze(0)
-        ref_t = torch.from_numpy(ref).float().unsqueeze(0)
-        if sr != 48000:
-            deg_t = TAF.resample(deg_t, sr, 48000)
-            ref_t = TAF.resample(ref_t, sr, 48000)
-        deg_np = np.ascontiguousarray(deg_t.squeeze(0).numpy(), dtype=np.float32)
-        ref_np = np.ascontiguousarray(ref_t.squeeze(0).numpy(), dtype=np.float32)
-        return zim.mos_from_signals(deg_np, ref_np)     
-
 
     def evaluate(self, deg, ref):
         results = {}
 
-        results['audiobox_CE'] = self.aesthetics_backend(deg, config['sample_rate'])['CE']
-        results['audiobox_CU'] = self.aesthetics_backend(deg, config['sample_rate'])['CU']
-        results['audiobox_PC'] = self.aesthetics_backend(deg, config['sample_rate'])['PC']
-        results['audiobox_PQ'] = self.aesthetics_backend(deg, config['sample_rate'])['PQ']
+        results['audiobox : content enjoyment'] = self.aesthetics_backend(deg, config['sample_rate'])['CE']
+        results['audiobox : content usefulness'] = self.aesthetics_backend(deg, config['sample_rate'])['CU']
+        results['audiobox : production complexity'] = self.aesthetics_backend(deg, config['sample_rate'])['PC']
+        results['audiobox : production quality'] = self.aesthetics_backend(deg, config['sample_rate'])['PQ']
 
         results['multiscale_stft'] = self.multiscale_stft_metric(deg, ref)
         results['visqol'] = self.visqol_metric(deg, ref)
