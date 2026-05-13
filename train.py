@@ -87,7 +87,7 @@ def main(hparams):
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument('--config_path', type=str, default='config.yaml', help='Path to config file')
+    parser.add_argument('--config_path', type=str, default='config_48k.yaml', help='Path to config file')
     hparams = parser.parse_args()
 
     main(hparams)

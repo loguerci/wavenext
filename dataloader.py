@@ -13,7 +13,8 @@ from torch.utils.data import DataLoader
 import torchaudio
 import soundfile as sf
 from utils.mel import MelSpectra
-import random
+import os
+
 
 class MockDataset(Dataset):
     """
@@ -27,26 +28,34 @@ class MockDataset(Dataset):
         return self.num_samples
 
     def __getitem__(self, idx):
-        # Generate random noise as audio sample
         audio = torch.randn(1, self.sample_length)  # (1, T)
         return audio
 
 class WaveNeXtDataset(Dataset):
-    def __init__(self, path_csv, sample_rate=24000, duration=1):
+    def __init__(self, path_csv, sample_rate=24000, duration=1, limit=None):
         self.sample_rate = sample_rate
         self.segment_length = sample_rate * duration
         self.segments = []  # list of (file_path, start_sample)
+        self.limit = limit
 
         with open(path_csv, 'r') as f:
             for line in f:
                 path = line.strip()
+                if path.endswith('.mp3'):
+                    wav_path = path.replace('.mp3', '.wav')
+                    if not os.path.exists(wav_path):
+                        print(f"Converting {path} to wav...")
+                        audio, sr = sf.read(path)
+                        sf.write(wav_path, audio, sr)
+                    path = wav_path
                 info = sf.info(path)
                 file_sr = info.samplerate
                 num_samples = int(info.frames * sample_rate / file_sr)
-                # Account for resampling
                 n_segments = num_samples // self.segment_length
                 for i in range(n_segments):
                     self.segments.append((path, file_sr, i * self.segment_length))
+                if limit is not None:
+                    self.segments = self.segments[:self.limit]
 
     def __len__(self):
         return len(self.segments)
@@ -90,7 +99,7 @@ if "__main__" == __name__:
     print(f"Mel shape: {mel.shape}")
 
     print("Process Bach violin dataset")
-    dataset =  WaveNeXtDataset(path_csv="data/bach_violin_dataset.csv", sample_rate=44100, duration=1)
+    dataset =  WaveNeXtDataset(path_csv="data/bach_violin_dataset.csv", sample_rate=44100, duration=1, limit=None)
     print(f"Dataset length: {len(dataset)}")
 
     dataloader = DataLoader(dataset, batch_size=2, shuffle=True)

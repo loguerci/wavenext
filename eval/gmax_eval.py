@@ -12,6 +12,8 @@ Made to evaluate timbre transfer performance with metrics categorized in 3 group
 - Target-domain match : Kernel Audio Distance, FAD, Density and Coverage
 - Source-content preservation : F0 stability, Raw Pitch Accuracy, Raw Chroma Accuracy, Cents RMSE, Voicing Recall, Structure Metric
 
+The test currently performed on the reimplementation of WaveNeXt (trained on the libriTTS dataset) and a non trained auto encoder.
+
 Author: Loïs Guerci
 """
 
@@ -26,7 +28,6 @@ from rich import print
 from rich.console import Console
 from rich.table import Table
 
-import torchaudio.functional as TAF
 import torch
 import numpy as np
 from torch.utils.data import DataLoader
@@ -50,7 +51,7 @@ def load_config(config_path):
         config = yaml.safe_load(f)
     return config
 
-config = load_config('/home/lois/wavenext/config.yaml')
+config = load_config('/home/lois/wavenext/config_24k.yaml')
 
 def average_results(results_list):
     keys = results_list[0].keys()
@@ -64,7 +65,8 @@ class GMAXEvaluator:
         # Audio quality metrics :
 
         # - reference free :
-        self.audiobox = AesPredictor(checkpoint_pth=None, precision='bf16', sample_rate=config['sample_rate'], data_col='wav')
+        #need to pip install audiobox-aesthetics and import the checkpoint file : https://huggingface.co/facebook/audiobox-aesthetics/blob/main/checkpoint.pt
+        self.audiobox = AesPredictor(checkpoint_pth='audiobox_checkpoint.pt', precision='bf16', sample_rate=config['sample_rate'], data_col='wav')
         self.audiobox.device = 'cuda'
         self.audiobox.setup_model()
 
@@ -131,18 +133,22 @@ class GMAXEvaluator:
 
 if __name__ == "__main__":
 
-    test_dataset = WaveNeXtDataset(path_csv=config['test_csv'], sample_rate=config['sample_rate'], duration=config['duration'])
+
+    # Loading dataset 
+    data = "/home/lois/wavenext/data/libritts_test.csv"
+    test_dataset = WaveNeXtDataset(path_csv=data, sample_rate=config['sample_rate'], duration=config['duration'], limit =100)
     test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=config['num_workers'])
     
+    # Init evaluation benchmark
     evaluator = GMAXEvaluator()
 
     total_results = []
     total_noise_results = []
-    total_db_results = []
+    total_dumb_results = []
     gen = []
     ref = []
     ran = []
-    db = []
+    dumb = []
 
     print("Evaluating WaveNeXt...")
 
@@ -162,25 +168,25 @@ if __name__ == "__main__":
             noise = torch.rand_like(generated_audio)
 
             result = evaluator.evaluate(generated_audio, reference_audio)
-            result_db = evaluator.evaluate(dumb_gen, reference_audio)
+            result_dumb= evaluator.evaluate(dumb_gen, reference_audio)
             result_noise = evaluator.evaluate(noise, reference_audio)
 
             if not math.isnan(result['f0_stability']):
                 total_results.append(result)
             if not math.isnan(result_noise['f0_stability']):
                 total_noise_results.append(result_noise)
-            if not math.isnan(result_db['f0_stability']):
-                total_db_results.append(result_db)
+            if not math.isnan(result_dumb['f0_stability']):
+                total_dumb_results.append(result_dumb)
 
             gen.append(generated_audio)
             ref.append(reference_audio)
             ran.append(noise)
-            db.append(dumb_gen)
+            dumb.append(dumb_gen)
             
     generated_audio = torch.cat(gen, dim=0)
     reference_audio = torch.cat(ref, dim=0)
     noise = torch.cat(ran, dim=0)
-    db_audio = torch.cat(db, dim=0)
+    dumb_audio = torch.cat(dumb, dim=0)
     
     table = Table(title="Evaluation Results")
     table.add_column("Metric", justify="left", style="cyan", no_wrap=True)
@@ -189,12 +195,12 @@ if __name__ == "__main__":
     table.add_column("Dumb model", justify="right", style="yellow")  
 
     for key in total_results[0].keys():
-        table.add_row(key, f"{average_results(total_results)[key]:.4f}", f"{average_results(total_noise_results)[key]:.4f}", f"{average_results(total_db_results)[key]:.4f}")
+        table.add_row(key, f"{average_results(total_results)[key]:.4f}", f"{average_results(total_noise_results)[key]:.4f}", f"{average_results(total_dumb_results)[key]:.4f}")
 
 
     dataset_results = evaluator.density_and_coverage(generated_audio, reference_audio)
     dataset_noise_results = evaluator.density_and_coverage(noise, reference_audio)
-    dataset_db_results = evaluator.density_and_coverage(db_audio, reference_audio)
+    dataset_db_results = evaluator.density_and_coverage(dumb_audio, reference_audio)
 
     table.add_row("Density", f"{dataset_results[0]:.4f}", f"{dataset_noise_results[0]:.4f}", f"{dataset_db_results[0]:.4f}")
     table.add_row("Coverage", f"{dataset_results[1]:.4f}", f"{dataset_noise_results[1]:.4f}", f"{dataset_db_results[1]:.4f}")

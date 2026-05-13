@@ -5,30 +5,26 @@ duration: 1
 
 # Model hyperparameters
 #sample_rate: 48000 
-sample_rate: 44100
+sample_rate: 48000
 
 #fft_dim: 2048
-fft_dim: 1024
+fft_dim: 2048
 
 dim: 512
 #shift_dim: 512
-shift_dim: 256
+shift_dim: 512
 n_mels: 80
 k: 3
 
 # Training hyperparameters
-batch_size: 16
-num_workers: 4
+batch_size: 8
+num_workers: 16
 num_epochs: 1000
 learning_rate: 0.0002
 log_dir: "logs"
 
 accelerator: "cuda"
 devices: 1
-
-train_csv: "libritts_train.csv"
-val_csv: "libritts_val.csv"
-test_csv: "libritts_test.csv"
 
 dataset: "data/bach_violin_dataset.csv"
 

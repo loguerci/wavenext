@@ -148,7 +148,7 @@ class WaveNeXt(pl.LightningModule):
 
     def configure_optimizers(self):
 
-        config = load_config('config.yaml')
+        config = load_config('config_48k.yaml')
 
         optimizer_g = optim.AdamW(self.generator.parameters(), lr=self.lr, betas=(0.9, 0.999))
         optimizer_d = optim.AdamW(list(self.discriminator_mpd.parameters())
