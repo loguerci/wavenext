@@ -30,6 +30,7 @@ from rich.table import Table
 
 import torch
 import numpy as np
+import torchaudio.functional as F
 from torch.utils.data import DataLoader
 from dataloader import WaveNeXtDataset
 from utils.mel import MelSpectra
@@ -40,7 +41,7 @@ from audio import FADMetric, MultiScaleSTFTMetric, ZimtohrliMetric, ViSQOLMetric
 from features import F0StabilityMetric, RawPitchAccuracyMetric, RawChromaAccuracyMetric, CentsRMSEMetric, ChromaConsistencyMetric, VoicingRecallMetric, StructureMetric
 from distribution import KernelAudioDistance, DensityAndCoverage
 from audiobox_aesthetics.infer import AesPredictor
-import zimtohrli as zim
+from zimtohrli import Pyohrli
 
 # Models :
 from models.wavenext import WaveNeXt
@@ -66,13 +67,15 @@ class GMAXEvaluator:
 
         # - reference free :
         #need to pip install audiobox-aesthetics and import the checkpoint file : https://huggingface.co/facebook/audiobox-aesthetics/blob/main/checkpoint.pt
-        self.audiobox = AesPredictor(checkpoint_pth='audiobox_checkpoint.pt', precision='bf16', sample_rate=config['sample_rate'], data_col='wav')
+        self.audiobox = AesPredictor(checkpoint_pth='audiobox_checkpoint.pt', precision='bf16', sample_rate=16000, data_col='wav')
         self.audiobox.device = 'cuda'
         self.audiobox.setup_model()
 
         # - reference based :
         self.multiscale_stft_metric = MultiScaleSTFTMetric(scales=[512, 256, 128], overlap=0.5)
         self.visqol_metric = ViSQOLMetric(sample_rate=config['sample_rate'])
+        #need to pip install zimtohrli
+        self.zimtohrli = Pyohrli()
 
         # Target-domain match metrics :
 
@@ -105,28 +108,35 @@ class GMAXEvaluator:
         with torch.no_grad():
             scores = self.audiobox.forward(batch)
 
-        return scores[0]
+        return scores[0]   
 
     def evaluate(self, deg, ref):
         results = {}
+        sr_audiobox = 16000
+        sr_zimtorhli = 48000
 
-        results['audiobox : content enjoyment'] = self.aesthetics_backend(deg, config['sample_rate'])['CE']
-        results['audiobox : content usefulness'] = self.aesthetics_backend(deg, config['sample_rate'])['CU']
-        results['audiobox : production complexity'] = self.aesthetics_backend(deg, config['sample_rate'])['PC']
-        results['audiobox : production quality'] = self.aesthetics_backend(deg, config['sample_rate'])['PQ']
+        deg_16 = F.resample(deg,  orig_freq=config['sample_rate'], new_freq=sr_audiobox)
+        deg_48 = F.resample(deg,  orig_freq=config['sample_rate'], new_freq=sr_zimtorhli)
+        ref_48 = F.resample(ref,  orig_freq=config['sample_rate'], new_freq=sr_zimtorhli)
 
-        results['multiscale_stft'] = self.multiscale_stft_metric(deg, ref)
+        #aes = self.aesthetics_backend(deg_16, sr_audiobox)
+        #results['audiobox : content enjoyment'] = aes['CE']
+        #results['audiobox : content usefulness'] = aes['CU']
+        #results['audiobox : production complexity'] = aes['PC']
+        #results['audiobox : production quality'] = aes['PQ']
+
+        #results['multiscale_stft'] = self.multiscale_stft_metric(deg, ref)
         results['visqol'] = self.visqol_metric(deg, ref)
-
-        results['kernel_audio_distance'] = self.kernel_audio_distance(deg, ref)
-        results['fad'] = self.fad(deg, ref)
+        results['zimtohrli'] = self.zimtohrli.distance(deg_48.squeeze_(0).detach().cpu(), ref_48.squeeze_(0).detach().cpu())
+        #results['kernel_audio_distance'] = self.kernel_audio_distance(deg, ref)
+        #results['fad'] = self.fad(deg, ref)
 
         results['f0_stability'] = self.f0_stability_metric(deg, ref)
-        results['cents_rms_error'] = self.cents_rms_error_metric(deg, ref)
-        results['raw_pitch_accuracy'] = self.raw_pitch_accuracy_metric(deg, ref)
-        results['raw_chroma_accuracy'] = self.raw_chroma_accuracy_metric(deg, ref)
-        results['chroma_consistency'] = self.chroma_consistency_metric(deg, ref)
-        results['voicing_recall'] = self.voicing_recall_metric(deg, ref)
+        #results['cents_rms_error'] = self.cents_rms_error_metric(deg, ref)
+        #results['raw_pitch_accuracy'] = self.raw_pitch_accuracy_metric(deg, ref)
+        #results['raw_chroma_accuracy'] = self.raw_chroma_accuracy_metric(deg, ref)
+        #results['chroma_consistency'] = self.chroma_consistency_metric(deg, ref)
+        #results['voicing_recall'] = self.voicing_recall_metric(deg, ref)
 
         return {k: v.item() if isinstance(v, torch.Tensor) else float(v) for k, v in results.items()}
     
@@ -136,7 +146,7 @@ if __name__ == "__main__":
 
     # Loading dataset 
     data = "/home/lois/wavenext/data/libritts_test.csv"
-    test_dataset = WaveNeXtDataset(path_csv=data, sample_rate=config['sample_rate'], duration=config['duration'], limit =100)
+    test_dataset = WaveNeXtDataset(path_csv=data, sample_rate=config['sample_rate'], duration=config['duration'], limit=50)
     test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=config['num_workers'])
     
     # Init evaluation benchmark
@@ -145,6 +155,7 @@ if __name__ == "__main__":
     total_results = []
     total_noise_results = []
     total_dumb_results = []
+    total_identity_results = []
     gen = []
     ref = []
     ran = []
@@ -165,11 +176,12 @@ if __name__ == "__main__":
             dumb_gen = evaluator.dumb(reference_audio)
             dumb_gen.squeeze_(1)
 
-            noise = torch.rand_like(generated_audio)
+            noise = torch.randn_like(generated_audio).clamp(-1, 1)
 
             result = evaluator.evaluate(generated_audio, reference_audio)
             result_dumb= evaluator.evaluate(dumb_gen, reference_audio)
             result_noise = evaluator.evaluate(noise, reference_audio)
+            result_identity = evaluator.evaluate(reference_audio, reference_audio)
 
             if not math.isnan(result['f0_stability']):
                 total_results.append(result)
@@ -177,6 +189,8 @@ if __name__ == "__main__":
                 total_noise_results.append(result_noise)
             if not math.isnan(result_dumb['f0_stability']):
                 total_dumb_results.append(result_dumb)
+            if not math.isnan(result_identity['f0_stability']):
+                total_identity_results.append(result_identity)
 
             gen.append(generated_audio)
             ref.append(reference_audio)
@@ -193,19 +207,24 @@ if __name__ == "__main__":
     table.add_column("WaveNeXt", justify="right", style="magenta")
     table.add_column("Random", justify="right", style="red")  
     table.add_column("Dumb model", justify="right", style="yellow")  
+    table.add_column("Identity", justify="right", style="green") 
 
     for key in total_results[0].keys():
-        table.add_row(key, f"{average_results(total_results)[key]:.4f}", f"{average_results(total_noise_results)[key]:.4f}", f"{average_results(total_dumb_results)[key]:.4f}")
+        table.add_row(key, f"{average_results(total_results)[key]:.4f}", 
+                           f"{average_results(total_noise_results)[key]:.4f}", 
+                           f"{average_results(total_dumb_results)[key]:.4f}",
+                           f"{average_results(total_identity_results)[key]:.4f}")
 
 
-    dataset_results = evaluator.density_and_coverage(generated_audio, reference_audio)
-    dataset_noise_results = evaluator.density_and_coverage(noise, reference_audio)
-    dataset_db_results = evaluator.density_and_coverage(dumb_audio, reference_audio)
+    #dataset_results = evaluator.density_and_coverage(generated_audio, reference_audio)
+    #dataset_noise_results = evaluator.density_and_coverage(noise, reference_audio)
+    #dataset_db_results = evaluator.density_and_coverage(dumb_audio, reference_audio)
+    #dataset_id_results = evaluator.density_and_coverage(reference_audio, reference_audio)
 
-    table.add_row("Density", f"{dataset_results[0]:.4f}", f"{dataset_noise_results[0]:.4f}", f"{dataset_db_results[0]:.4f}")
-    table.add_row("Coverage", f"{dataset_results[1]:.4f}", f"{dataset_noise_results[1]:.4f}", f"{dataset_db_results[1]:.4f}")
-    table.add_row("Precision", f"{dataset_results[2]:.4f}", f"{dataset_noise_results[2]:.4f}", f"{dataset_db_results[2]:.4f}")
-    table.add_row("Recall", f"{dataset_results[3]:.4f}", f"{dataset_noise_results[3]:.4f}", f"{dataset_db_results[3]:.4f}")
+    #table.add_row("Density", f"{dataset_results[0]:.4f}", f"{dataset_noise_results[0]:.4f}", f"{dataset_db_results[0]:.4f}", f"{dataset_id_results[0]:.4f}")
+    #table.add_row("Coverage", f"{dataset_results[1]:.4f}", f"{dataset_noise_results[1]:.4f}", f"{dataset_db_results[1]:.4f}", f"{dataset_id_results[1]:.4f}")
+    #table.add_row("Precision", f"{dataset_results[2]:.4f}", f"{dataset_noise_results[2]:.4f}", f"{dataset_db_results[2]:.4f}", f"{dataset_id_results[2]:.4f}")
+    #table.add_row("Recall", f"{dataset_results[3]:.4f}", f"{dataset_noise_results[3]:.4f}", f"{dataset_db_results[3]:.4f}", f"{dataset_id_results[3]:.4f}")
     console = Console()
     console.print(table)
 
