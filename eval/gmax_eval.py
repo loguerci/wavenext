@@ -8,9 +8,9 @@ Evaluation script using Gmax repository by Philippe Esling for several baselines
 - Noise (white noise)
 
 Made to evaluate timbre transfer performance with metrics categorized in 3 groups :
-- Audio quality : Audiobox Aesthetics, MMMOS, DeePAQScorer, ViSQOL, Multi-Scale STFT Distance, Zimtohrli
+- Audio quality : Audiobox Aesthetics, ViSQOL, Multi-Scale STFT Distance, Zimtohrli
 - Target-domain match : Kernel Audio Distance, FAD, Density and Coverage
-- Source-content preservation : F0 stability, Raw Pitch Accuracy, Raw Chroma Accuracy, Cents RMSE, Voicing Recall, Structure Metric
+- Source-content preservation : F0 stability, Raw Pitch Accuracy, Raw Chroma Accuracy, Cents RMSE, Voicing Recall
 
 The test currently performed on the reimplementation of WaveNeXt (trained on the libriTTS dataset) and a non trained auto encoder.
 
@@ -91,7 +91,7 @@ class GMAXEvaluator:
         self.voicing_recall_metric = VoicingRecallMetric(sample_rate=config['sample_rate'])
         # -----------------------------------------------------------------
 
-        self.mel_extractor = MelSpectra(sample_rate=config['sample_rate'], n_fft=1024, hop_length=256, n_mels=80).to(self.device)
+        self.mel_extractor = MelSpectra(sample_rate=config['sample_rate'], n_fft=config['fft_dim'], hop_length=config['shift_dim'], n_mels=config['n_mels']).to(self.device)
 
         # Models :
         self.model = WaveNeXt(dim=config['dim'], sample_rate=config['sample_rate'], fft_dim=config['fft_dim'], shift_dim=config['shift_dim'], n_mels=config['n_mels'], k=config['k'], lr=config['learning_rate']).to(self.device)
@@ -118,24 +118,24 @@ class GMAXEvaluator:
         deg_48 = F.resample(deg,  orig_freq=config['sample_rate'], new_freq=sr_zimtorhli)
         ref_48 = F.resample(ref,  orig_freq=config['sample_rate'], new_freq=sr_zimtorhli)
 
-        aes = self.aesthetics_backend(deg_16, sr_audiobox)
-        results['audiobox : content enjoyment'] = aes['CE']
-        results['audiobox : content usefulness'] = aes['CU']
-        results['audiobox : production complexity'] = aes['PC']
-        results['audiobox : production quality'] = aes['PQ']
+        #aes = self.aesthetics_backend(deg_16, sr_audiobox)
+        #results['audiobox : content enjoyment'] = aes['CE']
+        #results['audiobox : content usefulness'] = aes['CU']
+        #results['audiobox : production complexity'] = aes['PC']
+        #results['audiobox : production quality'] = aes['PQ']
 
-        results['multiscale_stft'] = self.multiscale_stft_metric(deg, ref)
-        results['visqol'] = self.visqol_metric(deg, ref)
-        results['zimtohrli'] = self.zimtohrli.distance(deg_48.squeeze_(0).detach().cpu(), ref_48.squeeze_(0).detach().cpu())
-        results['kernel_audio_distance'] = self.kernel_audio_distance(deg, ref)
-        results['fad'] = self.fad(deg, ref)
+        #results['multiscale_stft'] = self.multiscale_stft_metric(deg, ref)
+        #results['visqol'] = self.visqol_metric(deg, ref)
+        #results['zimtohrli'] = self.zimtohrli.distance(deg_48.squeeze_(0).detach().cpu(), ref_48.squeeze_(0).detach().cpu())
+        #results['kernel_audio_distance'] = self.kernel_audio_distance(deg, ref)
+        #results['fad'] = self.fad(deg, ref)
 
         results['f0_stability'] = self.f0_stability_metric(deg, ref)
-        results['cents_rms_error'] = self.cents_rms_error_metric(deg, ref)
-        results['raw_pitch_accuracy'] = self.raw_pitch_accuracy_metric(deg, ref)
-        results['raw_chroma_accuracy'] = self.raw_chroma_accuracy_metric(deg, ref)
-        results['chroma_consistency'] = self.chroma_consistency_metric(deg, ref)
-        results['voicing_recall'] = self.voicing_recall_metric(deg, ref)
+        results['cents_rms_error'] = self.cents_rms_error_metric(deg, ref) / 1200.0 #scale issue ?
+        #results['raw_pitch_accuracy'] = self.raw_pitch_accuracy_metric(deg, ref)
+        #results['raw_chroma_accuracy'] = self.raw_chroma_accuracy_metric(deg, ref)
+        #results['chroma_consistency'] = self.chroma_consistency_metric(deg, ref)
+        #results['voicing_recall'] = self.voicing_recall_metric(deg, ref)
 
         return {k: v.item() if isinstance(v, torch.Tensor) else float(v) for k, v in results.items()}
     
@@ -145,7 +145,7 @@ if __name__ == "__main__":
 
     # Loading dataset 
     data = "/home/lois/wavenext/data/libritts_test.csv"
-    test_dataset = WaveNeXtDataset(path_csv=data, sample_rate=config['sample_rate'], duration=config['duration'], limit=50)
+    test_dataset = WaveNeXtDataset(path_csv=data, sample_rate=config['sample_rate'], duration=config['duration'], limit=100)
     test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=config['num_workers'])
     
     # Init evaluation benchmark
