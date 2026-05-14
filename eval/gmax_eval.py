@@ -78,9 +78,9 @@ class GMAXEvaluator:
 
         # Target-domain match metrics :
 
-        self.kernel_audio_distance = KernelAudioDistance(model='clap-laion-audio', pre_compute=False, sample_rate=config['sample_rate'])
-        self.fad = FADMetric(sample_rate=config['sample_rate'], duration_seconds=1.0, embedding_model='panns-wavegram-logmel')
-        self.density_and_coverage = DensityAndCoverage(nearest_k=1, compute_pr=True, model='clap-laion-audio', pre_compute=False)
+        self.kernel_audio_distance = KernelAudioDistance(model='clap-2023', pre_compute=False, sample_rate=config['sample_rate'])
+        self.fad = FADMetric(sample_rate=config['sample_rate'], duration_seconds=1.0, embedding_model='clap-2023')
+        self.density_and_coverage = DensityAndCoverage(nearest_k=1, compute_pr=True, model='clap-2023', pre_compute=False)
 
         # Source-content preservation metrics :
         self.f0_stability_metric = F0StabilityMetric(sample_rate=config['sample_rate'])
@@ -118,24 +118,24 @@ class GMAXEvaluator:
         deg_48 = F.resample(deg,  orig_freq=config['sample_rate'], new_freq=sr_zimtorhli)
         ref_48 = F.resample(ref,  orig_freq=config['sample_rate'], new_freq=sr_zimtorhli)
 
-        #aes = self.aesthetics_backend(deg_16, sr_audiobox)
-        #results['audiobox : content enjoyment'] = aes['CE']
-        #results['audiobox : content usefulness'] = aes['CU']
-        #results['audiobox : production complexity'] = aes['PC']
-        #results['audiobox : production quality'] = aes['PQ']
+        aes = self.aesthetics_backend(deg_16, sr_audiobox)
+        results['audiobox : content enjoyment'] = aes['CE']
+        results['audiobox : content usefulness'] = aes['CU']
+        results['audiobox : production complexity'] = aes['PC']
+        results['audiobox : production quality'] = aes['PQ']
 
-        #results['multiscale_stft'] = self.multiscale_stft_metric(deg, ref)
-        #results['visqol'] = self.visqol_metric(deg, ref)
-        #results['zimtohrli'] = self.zimtohrli.distance(deg_48.squeeze_(0).detach().cpu(), ref_48.squeeze_(0).detach().cpu())
-        #results['kernel_audio_distance'] = self.kernel_audio_distance(deg, ref)
-        #results['fad'] = self.fad(deg, ref)
+        results['multiscale_stft'] = self.multiscale_stft_metric(deg, ref)
+        results['visqol'] = self.visqol_metric(deg, ref)
+        results['zimtohrli'] = self.zimtohrli.distance(deg_48.squeeze_(0).detach().cpu(), ref_48.squeeze_(0).detach().cpu())
+        results['kernel_audio_distance'] = self.kernel_audio_distance(deg, ref)
+        results['fad'] = self.fad(deg, ref)
 
         results['f0_stability'] = self.f0_stability_metric(deg, ref)
         results['cents_rms_error'] = self.cents_rms_error_metric(deg, ref) / 1200.0 #scale issue ?
-        #results['raw_pitch_accuracy'] = self.raw_pitch_accuracy_metric(deg, ref)
-        #results['raw_chroma_accuracy'] = self.raw_chroma_accuracy_metric(deg, ref)
-        #results['chroma_consistency'] = self.chroma_consistency_metric(deg, ref)
-        #results['voicing_recall'] = self.voicing_recall_metric(deg, ref)
+        results['raw_pitch_accuracy'] = self.raw_pitch_accuracy_metric(deg, ref)
+        results['raw_chroma_accuracy'] = self.raw_chroma_accuracy_metric(deg, ref)
+        results['chroma_consistency'] = self.chroma_consistency_metric(deg, ref)
+        results['voicing_recall'] = self.voicing_recall_metric(deg, ref)
 
         return {k: v.item() if isinstance(v, torch.Tensor) else float(v) for k, v in results.items()}
     
@@ -145,7 +145,7 @@ if __name__ == "__main__":
 
     # Loading dataset 
     data = "/home/lois/wavenext/data/libritts_test.csv"
-    test_dataset = WaveNeXtDataset(path_csv=data, sample_rate=config['sample_rate'], duration=config['duration'], limit=100)
+    test_dataset = WaveNeXtDataset(path_csv=data, sample_rate=config['sample_rate'], duration=config['duration'], limit=500)
     test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=config['num_workers'])
     
     # Init evaluation benchmark
@@ -168,10 +168,12 @@ if __name__ == "__main__":
         for batch in pbar:
             reference_audio = batch.to(evaluator.device)
             reference_audio = reference_audio.squeeze(1)
+
             mel = evaluator.mel_extractor(reference_audio.to(evaluator.device))
             mel.squeeze_(1)
             generated_audio = evaluator.model.generator(mel)
             generated_audio = generated_audio[..., :reference_audio.size(-1)]
+            
             dumb_gen = evaluator.dumb(reference_audio)
             dumb_gen.squeeze_(1)
 
