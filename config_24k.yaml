@@ -11,6 +11,7 @@ sample_rate: 24000
 fft_dim: 1024
 
 dim: 512
+
 #shift_dim: 512
 shift_dim: 256
 n_mels: 80

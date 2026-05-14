@@ -40,8 +40,9 @@ def main(hparams):
     config = load_config(hparams.config_path)
 
     model = WaveNeXt(
-        sample_rate=config['sample_rate'],
         dim=config['dim'],
+        sample_rate=config['sample_rate'],
+        fft_dim=config['fft_dim'],
         shift_dim=config['shift_dim'],
         n_mels=config['n_mels'],
         k=config['k'],
@@ -73,7 +74,7 @@ def main(hparams):
 
     logger = TensorBoardLogger(save_dir=config['log_dir'] + f'/{formatted}', name='wavenext')
 
-    audio = audio_log(dataset=val_dataset, every_n_epochs=20, num_samples=4, sample_rate=config['sample_rate'])
+    audio = audio_log(dataset=val_dataset, every_n_epochs=10, num_samples=4, sample_rate=config['sample_rate'])
 
     trainer = Trainer(accelerator=config['accelerator'], 
                       devices=config['devices'], 
@@ -81,7 +82,7 @@ def main(hparams):
                       logger=logger,
                       callbacks=[ModelSummary(max_depth=2), checkpoint_callback, audio])
     
-    resume_ckpt = '/home/lois/wavenext/checkpoints/06-05_at_15_04_31/wavenext-epoch=449-val_mel_loss=2.61.ckpt'
+    resume_ckpt = '/home/lois/wavenext/checkpoints/14-05_at_01_48_23/wavenext-epoch=05-val_mel_loss=39.993.ckpt'
 
     trainer.fit(model, train_loader, val_loader, ckpt_path=resume_ckpt if config['resume'] else None)
 

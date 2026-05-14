@@ -26,7 +26,7 @@ def load_config(config_path):
 
 
 class WaveNeXt(pl.LightningModule):
-    def __init__(self, dim=512, sample_rate=24000, fft_dim=1024, shift_dim=256, n_mels=80, k=3, lr=2e-4):
+    def __init__(self, dim: int, sample_rate: int, fft_dim: int, shift_dim: int, n_mels: int, k: int, lr: float):
         super().__init__()
 
         self.sample_rate = sample_rate

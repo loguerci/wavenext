@@ -10,7 +10,7 @@ import torchaudio
 
 
 class MelSpectra(nn.Module):
-    def __init__(self, sample_rate=24000, n_fft=1024, hop_length=256, n_mels=80):
+    def __init__(self, sample_rate: int, n_fft: int, hop_length: int, n_mels: int):
         super(MelSpectra, self).__init__()
         self.mel_spectrogram = torchaudio.transforms.MelSpectrogram(
             sample_rate=sample_rate,
