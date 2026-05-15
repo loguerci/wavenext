@@ -18,8 +18,8 @@ Author: Loïs Guerci
 """
 
 import sys
-sys.path.insert(0, '/home/lois/models_benchmark/')
-sys.path.insert(0, '/home/lois/wavenext/')
+sys.path.insert(0, '../models_benchmark/')
+sys.path.insert(0, '../wavenext/')
 
 import math
 import tqdm
@@ -43,7 +43,6 @@ from audiobox_aesthetics.infer import AesPredictor
 from zimtohrli import Pyohrli
 
 # Models :
-from models.wavenext import WaveNeXt
 from models.dummy_ae import DumpCodec
 
 def load_config(config_path):
@@ -93,10 +92,7 @@ class GMAXEvaluator:
 
         self.mel_extractor = MelSpectra(sample_rate=config['sample_rate'], n_fft=config['fft_dim'], hop_length=config['shift_dim'], n_mels=config['n_mels']).to(self.device)
 
-        # Models :
-        self.model = WaveNeXt(dim=config['dim'], sample_rate=config['sample_rate'], fft_dim=config['fft_dim'], shift_dim=config['shift_dim'], n_mels=config['n_mels'], k=config['k'], lr=config['learning_rate']).to(self.device)
-        self.model.load_state_dict(torch.load("/home/lois/wavenext/checkpoints/07-05_at_03_56_57/wavenext-epoch=453-val_mel_loss=1.89.ckpt")['state_dict'])
-        self.model.eval()
+        self.model = torch.jit.load("libritts_wavenext_24k.pt")
 
         self.dumb = DumpCodec().to(self.device)
         self.dumb.eval()
@@ -145,7 +141,7 @@ if __name__ == "__main__":
 
     # Loading dataset 
     data = "/home/lois/wavenext/data/libritts_test.csv"
-    test_dataset = WaveNeXtDataset(path_csv=data, sample_rate=config['sample_rate'], duration=config['duration'], limit=500)
+    test_dataset = WaveNeXtDataset(path_csv=data, sample_rate=config['sample_rate'], duration=config['duration'], limit=50)
     test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=config['num_workers'])
     
     # Init evaluation benchmark
@@ -171,7 +167,7 @@ if __name__ == "__main__":
 
             mel = evaluator.mel_extractor(reference_audio.to(evaluator.device))
             mel.squeeze_(1)
-            generated_audio = evaluator.model.generator(mel)
+            generated_audio = evaluator.model(mel)
             generated_audio = generated_audio[..., :reference_audio.size(-1)]
             
             dumb_gen = evaluator.dumb(reference_audio)
