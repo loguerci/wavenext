@@ -107,14 +107,12 @@ class GMAXEvaluator:
 
     def evaluate(self, deg, ref):
         results = {}
-        sr_audiobox = 16000
         sr_zimtorhli = 48000
 
-        deg_16 = F.resample(deg,  orig_freq=config['sample_rate'], new_freq=sr_audiobox)
         deg_48 = F.resample(deg,  orig_freq=config['sample_rate'], new_freq=sr_zimtorhli)
         ref_48 = F.resample(ref,  orig_freq=config['sample_rate'], new_freq=sr_zimtorhli)
 
-        aes = self.aesthetics_backend(deg_16, sr_audiobox)
+        aes = self.aesthetics_backend(deg, config['sample_rate'])
         results['audiobox : content enjoyment'] = aes['CE']
         results['audiobox : content usefulness'] = aes['CU']
         results['audiobox : production complexity'] = aes['PC']
