@@ -54,10 +54,14 @@ def main(hparams):
     val_size = int(0.15 * len(dataset))
     test_size = len(dataset) - train_size - val_size
 
+
     train_dataset, val_dataset, test_dataset = random_split(
         dataset, [train_size, val_size, test_size],
         generator=torch.Generator().manual_seed(42)  # reproducible split
         )
+
+    print(f"Number of train samples : {len(train_dataset)}")
+    print(f"Number of validation samples : {len(val_dataset)}")
 
     train_loader = DataLoader(train_dataset, batch_size=config['batch_size'], shuffle=True, num_workers=config['num_workers'])
     val_loader = DataLoader(val_dataset, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'])
@@ -82,7 +86,7 @@ def main(hparams):
                       logger=logger,
                       callbacks=[ModelSummary(max_depth=2), checkpoint_callback, audio])
     
-    resume_ckpt = '/home/lois/wavenext/checkpoints/14-05_at_01_48_23/wavenext-epoch=05-val_mel_loss=39.993.ckpt'
+    resume_ckpt = '/home/lois/wavenext/checkpoints/14-05_at_04_41_05/wavenext-epoch=281-val_mel_loss=19.164.ckpt'
 
     trainer.fit(model, train_loader, val_loader, ckpt_path=resume_ckpt if config['resume'] else None)
 

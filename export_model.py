@@ -7,7 +7,7 @@ def load_config(config_path):
         config = yaml.safe_load(f)
     return config
 
-config = load_config('/home/lois/wavenext/config_24k.yaml')
+config = load_config('/home/lois/wavenext/config_48k.yaml')
 
 model = WaveNeXt(dim=config['dim'], 
                  sample_rate=config['sample_rate'], 
@@ -17,8 +17,8 @@ model = WaveNeXt(dim=config['dim'],
                  k=config['k'], 
                  lr=config['learning_rate']).to('cuda')
 
-model.load_state_dict(torch.load("/home/lois/wavenext/checkpoints/07-05_at_03_56_57/wavenext-epoch=453-val_mel_loss=1.89.ckpt")['state_dict'])
+model.load_state_dict(torch.load("/home/lois/wavenext/checkpoints/14-05_at_04_41_05/wavenext-epoch=208-val_mel_loss=19.355.ckpt")['state_dict'])
 model.eval()
 
 export_model= torch.jit.script(model.generator)
-torch.jit.save(export_model, "my_wavenext_24k.pt")
+torch.jit.save(export_model, "violin_wavenext_48k.pt")

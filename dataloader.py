@@ -67,19 +67,19 @@ class WaveNeXtDataset(Dataset):
         frames_orig = int(self.segment_length * file_sr / self.sample_rate)
         audio, sr = torchaudio.load(path, frame_offset=start_orig, num_frames=frames_orig)
 
-        if audio.size(0) > 1:
-            audio = audio.mean(dim=0, keepdim=True)
-        if sr != self.sample_rate:
-            resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=self.sample_rate)
-            audio = resampler(audio)
+        if audio.size != 0: #ensure chunk has sound
+            if audio.size(0) > 1:
+                audio = audio.mean(dim=0, keepdim=True)
+            if sr != self.sample_rate:
+                resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=self.sample_rate)
+                audio = resampler(audio)
 
-        # Ensure exact length
-        if audio.size(1) < self.segment_length:
-            audio = torch.nn.functional.pad(audio, (0, self.segment_length - audio.size(1)))
-        else:
-            audio = audio[:, :self.segment_length]
-
-        return audio
+            # Ensure exact length
+            if audio.size(1) < self.segment_length:
+                audio = torch.nn.functional.pad(audio, (0, self.segment_length - audio.size(1)))
+            else:
+                audio = audio[:, :self.segment_length]
+            return audio
 
 
 

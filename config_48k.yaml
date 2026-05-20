@@ -27,4 +27,4 @@ devices: 1
 
 dataset: "data/bach_violin_dataset.csv"
 
-resume: true
+resume: false
