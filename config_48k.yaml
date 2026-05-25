@@ -25,6 +25,6 @@ log_dir: "logs"
 accelerator: "cuda"
 devices: 1
 
-dataset: "data/bach_violin_dataset.csv"
+dataset: "data/kentaro_dataset.csv"
 
 resume: false
