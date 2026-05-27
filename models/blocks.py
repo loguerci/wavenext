@@ -31,27 +31,30 @@ class ConvNeXt(nn.Module):
         x = x.transpose(1, 2)  # (B, C, T)
         x = x + res
         return x
-    
-class cached_ConvNeXt(nn.Module):
-    # Input shape : (B, C, T)
-    def __init__(self, in_channels, inter_channels):
-        super(cached_ConvNeXt, self).__init__()
-        self.depthwise = cc.CachedConv1d(in_channels, in_channels, kernel_size=7, padding=3, groups=in_channels)
-        self.norm = nn.LayerNorm(in_channels)
-        self.pointwise1 = nn.Linear(in_channels, inter_channels)
-        self.pointwise2 = nn.Linear(inter_channels, in_channels)
+
+class ConvNeXtcausal(nn.Module):
+    """ConvNeXt block avec depthwise conv causale"""
+    def __init__(self, dim: int, inter_channels: int):
+        super().__init__()
+        self.pad = nn.ConstantPad1d((6, 0), 0)  # kernel=7 → pad 6 à gauche
+        self.depthwise = nn.Conv1d(dim, dim, kernel_size=7, padding=0, groups=dim)
+        self.norm = nn.LayerNorm(dim, eps=1e-6)
+        self.pointwise1 = nn.Linear(dim, inter_channels)
+        self.act = nn.GELU()
+        self.pointwise2 = nn.Linear(inter_channels, dim)
 
     def forward(self, x):
-        res = x
+        residual = x
+        x = self.pad(x)
         x = self.depthwise(x)
-        x = x.transpose(1, 2)  # (B, T, C)        
+        x = x.transpose(1, 2)   # (B, T, dim)
         x = self.norm(x)
         x = self.pointwise1(x)
         x = self.act(x)
         x = self.pointwise2(x)
-        x = x.transpose(1, 2)  # (B, C, T)
-        x = x + res
-        return x
+        x = x.transpose(1, 2)   # (B, dim, T)
+        return x + residual
+
     
 if "__main__" == __name__:
     x = torch.randn(2, 64, 128)

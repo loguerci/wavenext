@@ -17,6 +17,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.utils.data import random_split
 
 from models.wavenext import WaveNeXt
+from models.wavenext_encodec import WaveNeXt_Encodec
 from torch.utils.data import DataLoader
 from dataloader import WaveNeXtDataset
 from audio_log import audio_log
@@ -39,7 +40,17 @@ def main(hparams):
     torch.set_float32_matmul_precision('high')
     config = load_config(hparams.config_path)
 
-    model = WaveNeXt(
+    #model = WaveNeXt(
+    #    dim=config['dim'],
+    #    sample_rate=config['sample_rate'],
+    #    fft_dim=config['fft_dim'],
+    #    shift_dim=config['shift_dim'],
+    #    n_mels=config['n_mels'],
+    #    k=config['k'],
+    #    lr=config['learning_rate']
+    #)
+
+    model = WaveNeXt_Encodec(
         dim=config['dim'],
         sample_rate=config['sample_rate'],
         fft_dim=config['fft_dim'],
@@ -91,6 +102,7 @@ def main(hparams):
     trainer.fit(model, train_loader, val_loader, ckpt_path=resume_ckpt if config['resume'] else None)
 
 if __name__ == "__main__":
+    # python train.py --config_path config_encodec_24.yaml
     parser = ArgumentParser()
     parser.add_argument('--config_path', type=str, default='config_48k.yaml', help='Path to config file')
     hparams = parser.parse_args()
