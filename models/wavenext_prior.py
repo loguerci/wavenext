@@ -24,8 +24,8 @@ def load_config(config_path):
     return config
 
 
-class WaveNeXt_Encodec(pl.LightningModule):
-    def __init__(self, dim: int, sample_rate: int, fft_dim: int, shift_dim: int, n_mels: int, k: int, lr: float):
+class WaveNeXtLatent(pl.LightningModule):
+    def __init__(self, dim: int, sample_rate: int, fft_dim: int, shift_dim: int, n_mels: int, k: int, lr: float, prior: str):
         super().__init__()
 
         self.sample_rate = sample_rate
@@ -35,6 +35,7 @@ class WaveNeXt_Encodec(pl.LightningModule):
         self.k = k
         self.dim = dim
         self.lr = lr
+        self.prior = prior
 
         # Model components
         self.decoder = Decoder(
@@ -47,10 +48,18 @@ class WaveNeXt_Encodec(pl.LightningModule):
         self.discriminator_mpd = MPD()
         self.discriminator_mrd = MRD()
 
-        self.encoder = EncodecModel.from_pretrained('facebook/encodec_24khz')
-        self.encoder.eval()
-        for param in self.encoder.parameters():
-            param.requires_grad = False
+        if self.prior == "encodec":
+            self.encoder = EncodecModel.from_pretrained('facebook/encodec_24khz')
+            self.encoder.eval()
+            for param in self.encoder.parameters():
+                param.requires_grad = False
+
+        if self.prior == "same":
+            from stable_audio_3 import AutoencoderModel
+            self.encoder = AutoencoderModel.from_pretrained("same-s")
+            self.encoder.eval()
+            for param in self.encoder.parameters():
+                param.requires_grad = False
 
         self.mel_extractor = MelSpectra(
             sample_rate=self.sample_rate,

@@ -17,7 +17,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.utils.data import random_split
 
 from models.wavenext import WaveNeXt
-from models.wavenext_encodec import WaveNeXt_Encodec
+from wavenext.models.wavenext_prior import WaveNeXtLatent
 from torch.utils.data import DataLoader
 from dataloader import WaveNeXtDataset
 from audio_log import audio_log
@@ -50,14 +50,15 @@ def main(hparams):
     #    lr=config['learning_rate']
     #)
 
-    model = WaveNeXt_Encodec(
+    model = WaveNeXtLatent(
         dim=config['dim'],
         sample_rate=config['sample_rate'],
         fft_dim=config['fft_dim'],
         shift_dim=config['shift_dim'],
         n_mels=config['n_mels'],
         k=config['k'],
-        lr=config['learning_rate']
+        lr=config['learning_rate'],
+        prior=config['prior']
     )
 
     dataset = WaveNeXtDataset(path_csv=config['dataset'], sample_rate=config['sample_rate'], duration=config['duration'])
