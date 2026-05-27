@@ -49,6 +49,8 @@ class WaveNeXt_Encodec(pl.LightningModule):
 
         self.encoder = EncodecModel.from_pretrained('facebook/encodec_24khz')
         self.encoder.eval()
+        for param in self.encoder.parameters():
+            param.requires_grad = False
 
         self.mel_extractor = MelSpectra(
             sample_rate=self.sample_rate,
@@ -75,7 +77,9 @@ class WaveNeXt_Encodec(pl.LightningModule):
   
         optimizer_g, optimizer_d = self.optimizers()
 
-        emb = self.encoder.encoder(x)
+        with torch.no_grad():
+            emb = self.encoder.encoder(x)
+            emb = (emb - emb.mean(dim=-1, keepdim=True)) / (emb.std(dim=-1, keepdim=True) + 1e-5)
 
         fake = self.decoder(emb)  # (B, shift_dim * T)
         fake = fake.unsqueeze(1)  # (B, shift_dim * T) -> (B, 1, shift_dim * T)

@@ -36,7 +36,7 @@ class ConvNeXtcausal(nn.Module):
     """ConvNeXt block avec depthwise conv causale"""
     def __init__(self, dim: int, inter_channels: int):
         super().__init__()
-        self.pad = nn.ConstantPad1d((6, 0), 0)  # kernel=7 → pad 6 à gauche
+        self.pad = nn.ConstantPad1d((6, 0), 0)  
         self.depthwise = nn.Conv1d(dim, dim, kernel_size=7, padding=0, groups=dim)
         self.norm = nn.LayerNorm(dim, eps=1e-6)
         self.pointwise1 = nn.Linear(dim, inter_channels)
