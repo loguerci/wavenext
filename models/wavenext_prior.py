@@ -15,6 +15,7 @@ from .decoder import Decoder
 from .discriminator import MPD, MRD
 from utils.loss import ReconstructionLoss, AdversarialLoss, FeatureMatchingLoss
 from transformers import EncodecModel
+import sys
 
 import pytorch_lightning as pl
 
@@ -55,6 +56,7 @@ class WaveNeXtLatent(pl.LightningModule):
                 param.requires_grad = False
 
         if self.prior == "same":
+            sys.path.append('../stable-audio-3')
             from stable_audio_3 import AutoencoderModel
             self.encoder = AutoencoderModel.from_pretrained("same-s")
             self.encoder.eval()

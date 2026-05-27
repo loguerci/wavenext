@@ -17,14 +17,14 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.utils.data import random_split
 
 from models.wavenext import WaveNeXt
-from wavenext.models.wavenext_prior import WaveNeXtLatent
+from models.wavenext_prior import WaveNeXtLatent
 from torch.utils.data import DataLoader
 from dataloader import WaveNeXtDataset
 from audio_log import audio_log
 
 import yaml
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1" 
+os.environ["CUDA_VISIBLE_DEVICES"] = "0" 
 
 
 def load_config(config_path):
