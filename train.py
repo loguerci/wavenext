@@ -24,8 +24,6 @@ from audio_log import audio_log
 
 import yaml
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0" 
-
 
 def load_config(config_path):
     with open(config_path, 'r') as f:
@@ -90,7 +88,7 @@ def main(hparams):
 
     logger = TensorBoardLogger(save_dir=config['log_dir'] + f'/{formatted}', name='wavenext')
 
-    audio = audio_log(dataset=val_dataset, every_n_epochs=10, num_samples=4, sample_rate=config['sample_rate'])
+    audio = audio_log(dataset=val_dataset, every_n_epochs=10, num_samples=4, sample_rate=config['sample_rate'], prior=config['prior'])
 
     trainer = Trainer(accelerator=config['accelerator'], 
                       devices=config['devices'], 

@@ -44,7 +44,7 @@ class WaveNeXtLatent(pl.LightningModule):
             dim=self.dim,
             shift_dim=self.shift_dim,
             inter_channels=self.dim * self.k,
-            num_blocks=4)
+            num_blocks=8)
         
         self.discriminator_mpd = MPD()
         self.discriminator_mrd = MRD()
