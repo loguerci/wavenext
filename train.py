@@ -24,6 +24,8 @@ from audio_log import audio_log
 
 import yaml
 
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+
 
 def load_config(config_path):
     with open(config_path, 'r') as f:

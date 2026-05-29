@@ -14,7 +14,8 @@ from utils.mel import MelSpectra
 from .decoder import Decoder
 from .discriminator import MPD, MRD
 from utils.loss import ReconstructionLoss, AdversarialLoss, FeatureMatchingLoss
-from transformers import EncodecModel
+from encodec import EncodecModel
+from encodec.utils import convert_audio
 import sys
 
 import pytorch_lightning as pl
@@ -50,18 +51,13 @@ class WaveNeXtLatent(pl.LightningModule):
         self.discriminator_mrd = MRD()
 
         if self.prior == "encodec":
-            self.encoder = EncodecModel.from_pretrained('facebook/encodec_24khz')
-            self.encoder.eval()
-            for param in self.encoder.parameters():
-                param.requires_grad = False
+            self.encoder = EncodecModel.encodec_model_24khz()
+            self.encoder.set_target_bandwidth(6.0)
 
         if self.prior == "same":
             sys.path.append('../stable-audio-3')
             from stable_audio_3 import AutoencoderModel
             self.encoder = AutoencoderModel.from_pretrained("same-s")
-            self.encoder.eval()
-            for param in self.encoder.parameters():
-                param.requires_grad = False
 
         self.mel_extractor = MelSpectra(
             sample_rate=self.sample_rate,
@@ -88,9 +84,11 @@ class WaveNeXtLatent(pl.LightningModule):
   
         optimizer_g, optimizer_d = self.optimizers()
 
-        with torch.no_grad():
-            emb = self.encoder.encoder(x)
-            emb = (emb - emb.mean(dim=-1, keepdim=True)) / (emb.std(dim=-1, keepdim=True) + 1e-5)
+        if self.prior == "encodec":
+            with torch.no_grad():
+                encoded_frames = self.encoder.encode(x)
+                codes = torch.cat([f[0] for f in encoded_frames], dim=-1)
+                emb = self.encoder.quantizer.decode(codes.transpose(0, 1))
 
         fake = self.decoder(emb)  # (B, shift_dim * T)
         fake = fake.unsqueeze(1)  # (B, shift_dim * T) -> (B, 1, shift_dim * T)
@@ -148,7 +146,9 @@ class WaveNeXtLatent(pl.LightningModule):
         x = batch
 
         with torch.no_grad():
-            emb = self.encoder.encoder(x)
+            encoded_frames = self.encoder.encode(x)
+            codes = torch.cat([f[0] for f in encoded_frames], dim=-1)
+            emb = self.encoder.quantizer.decode(codes.transpose(0, 1))
             fake = self.decoder(emb)
 
         # Just log some metrics, no backward

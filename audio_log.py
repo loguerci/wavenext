@@ -4,7 +4,8 @@ import torchaudio
 import pytorch_lightning as pl
 from utils.mel import MelSpectra
 import yaml
-from transformers import EncodecModel
+from encodec import EncodecModel
+from encodec.utils import convert_audio
 
 def load_config(config_path):
     with open(config_path, 'r') as f:
@@ -22,7 +23,8 @@ class audio_log(pl.Callback):
         self.sample_rate = sample_rate
         
         if self.prior == "encodec":
-            self.encoder = EncodecModel.from_pretrained('facebook/encodec_24khz')
+            self.encoder = EncodecModel.encodec_model_24khz()
+            self.encoder.set_target_bandwidth(6.0)
         if self.prior == "same":
             import sys
             sys.path.append('../stable-audio-3')
@@ -43,8 +45,9 @@ class audio_log(pl.Callback):
         pl_module.eval()
         with torch.no_grad():
             for i in range(self.num_samples):
-                emb = self.encoder.encoder(self.dataset[i].unsqueeze(0))  # (1, 128, T)
-                emb = (emb - emb.mean(dim=-1, keepdim=True)) / (emb.std(dim=-1, keepdim=True) + 1e-5)
+                encoded_frames = self.encoder.encode(self.dataset[i].unsqueeze(0))
+                codes = torch.cat([f[0] for f in encoded_frames], dim=-1)
+                emb = self.encoder.quantizer.decode(codes.transpose(0, 1))
                 fake = pl_module.decoder(emb.to(pl_module.device))
                 
                 torchaudio.save(

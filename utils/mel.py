@@ -20,7 +20,10 @@ class MelSpectra(nn.Module):
         )
 
     def forward(self, x):
-        return self.mel_spectrogram(x)
+        mel = self.mel_spectrogram(x)
+        mel = torch.log(mel.clamp(min=1e-5))
+        return mel
+        
     
 
 if "__main__" == __name__:

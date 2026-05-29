@@ -24,7 +24,7 @@ num_epochs: 1000
 learning_rate: 0.0002
 log_dir: "logs"
 
-accelerator: "cuda:1"
+accelerator: "cuda"
 devices: 1
 
 dataset: "data/bigyuki_dataset.csv"
