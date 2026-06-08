@@ -32,9 +32,9 @@ class MockDataset(Dataset):
         return audio
 
 class WaveNeXtDataset(Dataset):
-    def __init__(self, path_csv, sample_rate=24000, duration=1, limit=None):
+    def __init__(self, path_csv, sample_rate=24000, samples=1, limit=None):
         self.sample_rate = sample_rate
-        self.segment_length = sample_rate * duration
+        self.segment_length = samples
         self.segments = []  # list of (file_path, start_sample)
         self.limit = limit
 
@@ -86,7 +86,7 @@ class WaveNeXtDataset(Dataset):
 if "__main__" == __name__:
 
     print("Process LibriTTS dataset")
-    dataset = WaveNeXtDataset(path_csv="data/libritts_dataset.csv", sample_rate=24000, duration=1)
+    dataset = WaveNeXtDataset(path_csv="data/libritts_dataset.csv", sample_rate=24000, samples=24000)
     print(f"Dataset length: {len(dataset)}")
 
     dataloader = DataLoader(dataset, batch_size=2, shuffle=True)
@@ -99,7 +99,7 @@ if "__main__" == __name__:
     print(f"Mel shape: {mel.shape}")
 
     print("Process Bach violin dataset")
-    dataset =  WaveNeXtDataset(path_csv="data/bach_violin_dataset.csv", sample_rate=44100, duration=1, limit=None)
+    dataset =  WaveNeXtDataset(path_csv="data/bach_violin_dataset.csv", sample_rate=44100, samples=44100, limit=None)
     print(f"Dataset length: {len(dataset)}")
 
     dataloader = DataLoader(dataset, batch_size=2, shuffle=True)

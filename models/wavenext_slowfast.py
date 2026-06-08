@@ -11,10 +11,11 @@ import torch.optim as optim
 import yaml
 
 from utils.mel import MelSpectra
-from .decoder import Decoder
+from .decoder import Cond_Decoder, Decoder
 from .discriminator import MPD, MRD
 from utils.loss import ReconstructionLoss, AdversarialLoss, FeatureMatchingLoss
 from encodec import EncodecModel
+from .slow_branch import SlowBranch
 import sys
 
 import pytorch_lightning as pl
@@ -25,8 +26,8 @@ def load_config(config_path):
     return config
 
 
-class WaveNeXtLatent(pl.LightningModule):
-    def __init__(self, dim: int, sample_rate: int, fft_dim: int, shift_dim: int, n_mels: int, k: int, lr_g: float, lr_d: float, prior: str):
+class WaveNeXtSlowFast(pl.LightningModule):
+    def __init__(self, dim: int, sample_rate: int, fft_dim: int, shift_dim: int, n_mels: int, k: int, lr_g: float, lr_d: float, prior: str, slow_size: int, r_factor: int):
         super().__init__()
 
         self.sample_rate = sample_rate
@@ -39,25 +40,28 @@ class WaveNeXtLatent(pl.LightningModule):
         self.lr_d = lr_d
         self.prior = prior
 
+        self.slow_buffer = []
+        self.slow_size = slow_size
+        self.r_factor = r_factor
+        self.steps_since_slow = 0
+        self.current_film = None
+
         # Model components
-        self.decoder = Decoder(
+        self.decoder = Cond_Decoder(
             in_channels=self.n_mels,
             dim=self.dim,
             shift_dim=self.shift_dim,
             inter_channels=self.dim * self.k,
             num_blocks=8)
         
+        self.slow_branch = SlowBranch(latent_dim=128, film_dim=self.dim)
+
         self.discriminator_mpd = MPD()
         self.discriminator_mrd = MRD()
 
         if self.prior == "encodec":
             self.encoder = EncodecModel.encodec_model_24khz()
             self.encoder.set_target_bandwidth(6.0)
-
-        if self.prior == "same":
-            sys.path.append('../stable-audio-3')
-            from stable_audio_3 import AutoencoderModel
-            self.encoder = AutoencoderModel.from_pretrained("same-s")
 
         self.mel_extractor = MelSpectra(
             sample_rate=self.sample_rate,
@@ -72,8 +76,8 @@ class WaveNeXtLatent(pl.LightningModule):
         self.feature_matching_loss = FeatureMatchingLoss()
 
         # Weights for losses
-        self.w_mrd = 0.1
-        self.w_mel = 45.0
+        self.w_mrd = 0.3
+        self.w_mel = 15.0
 
         self.automatic_optimization = False
 
@@ -81,7 +85,7 @@ class WaveNeXtLatent(pl.LightningModule):
 
         x = batch  # (B, 1, T)
         sequence_length = x.size(2)
-
+  
         optimizer_g, optimizer_d = self.optimizers()
 
         if self.prior == "encodec":
@@ -90,45 +94,65 @@ class WaveNeXtLatent(pl.LightningModule):
                 codes = torch.cat([f[0] for f in encoded_frames], dim=-1)
                 emb = self.encoder.quantizer.decode(codes.transpose(0, 1))
 
-        fake = self.decoder(emb)  # (B, shift_dim * T)
+        self.slow_buffer.append(emb.detach())
+        if len(self.slow_buffer) > self.slow_size:
+            self.slow_buffer.pop(0)
+
+        if len(self.slow_buffer) == self.slow_size:
+            if self.current_film is None or self.steps_since_slow >= self.r_factor:
+                slow_chunk = torch.cat(self.slow_buffer, dim=2)
+                slow_chunk = slow_chunk.transpose(1, 2)  # (B, slow_size, latent_dim)
+                gamma, beta = self.slow_branch(slow_chunk)
+                self.current_film = (gamma, beta)
+                self.steps_since_slow = 0
+            else:
+                self.steps_since_slow += 1
+
+        fake = self.decoder(emb, self.current_film)  # (B, shift_dim * T)
         fake = fake.unsqueeze(1)  # (B, shift_dim * T) -> (B, 1, shift_dim * T)
-        fake = fake[:, :, :sequence_length]
-        fake_detached = fake.detach()
 
-        mel_fake = self.mel_extractor(fake).squeeze(1)
-        g_loss_recon = self.reconstruction_loss(mel_fake, self.mel_extractor(x).squeeze(1))
-
+        # Discriminator step
         optimizer_d.zero_grad()
+
+        fake = fake[:, :, :sequence_length]  # Ensure fake has the same length as real
+        fake_detached = fake.detach()  # Detach fake from the generator graph for discriminator update
 
         real_fmaps_mpd, real_out_mpd = self.discriminator_mpd(x)
         real_fmaps_mrd, real_out_mrd = self.discriminator_mrd(x)
-        _, fake_out_mpd = self.discriminator_mpd(fake_detached)
-        _, fake_out_mrd = self.discriminator_mrd(fake_detached)
+        fake_fmaps_mpd, fake_out_mpd = self.discriminator_mpd(fake_detached)
+        fake_fmaps_mrd, fake_out_mrd = self.discriminator_mrd(fake_detached)
 
+        # Compute Losses
         d_loss_mpd = self.adversarial_loss.discriminator_loss(real_out_mpd, fake_out_mpd)
         d_loss_mrd = self.adversarial_loss.discriminator_loss(real_out_mrd, fake_out_mrd)
         total_d_loss = d_loss_mpd + self.w_mrd * d_loss_mrd
 
         self.log('d_loss', total_d_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
-        total_d_loss.backward()
+        total_d_loss.backward()        
         optimizer_d.step()
 
         # Generator step
         optimizer_g.zero_grad()
 
+        # Compute Losses
+
         fake_fmaps_mpd, fake_out_mpd = self.discriminator_mpd(fake)
         fake_fmaps_mrd, fake_out_mrd = self.discriminator_mrd(fake)
-        real_fmaps_mpd, _ = self.discriminator_mpd(x)
+
+        real_fmaps_mpd, _ = self.discriminator_mpd(x)  
         real_fmaps_mrd, _ = self.discriminator_mrd(x)
 
         g_loss_mpd = self.adversarial_loss.generator_loss(fake_out_mpd)
         g_loss_mrd = self.adversarial_loss.generator_loss(fake_out_mrd)
         g_loss_adv = g_loss_mpd + self.w_mrd * g_loss_mrd
+        mel_fake = self.mel_extractor(fake) 
+        mel_fake = mel_fake.squeeze(1)  # (B, n_mels, T)
+
+        g_loss_recon = self.reconstruction_loss(mel_fake, self.mel_extractor(x).squeeze(1))
 
         g_loss_fm_mpd = self.feature_matching_loss(fake_fmaps_mpd, real_fmaps_mpd)
         g_loss_fm_mrd = self.feature_matching_loss(fake_fmaps_mrd, real_fmaps_mrd)
         g_loss_fm = g_loss_fm_mpd + self.w_mrd * g_loss_fm_mrd
-
         total_g_loss = g_loss_adv + self.w_mel * g_loss_recon + g_loss_fm
 
         self.log('g_loss', total_g_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
@@ -158,7 +182,7 @@ class WaveNeXtLatent(pl.LightningModule):
 
         config = load_config('config_48k.yaml')
 
-        optimizer_g = optim.AdamW(self.decoder.parameters(), lr=self.lr_g, betas=(0.9, 0.999))
+        optimizer_g = optim.AdamW(list(self.decoder.parameters()) + list(self.slow_branch.parameters()), lr=self.lr_g, betas=(0.9, 0.999))
         optimizer_d = optim.AdamW(list(self.discriminator_mpd.parameters())
                                    + list(self.discriminator_mrd.parameters()), lr=self.lr_d, betas=(0.9, 0.999))
         
@@ -166,3 +190,8 @@ class WaveNeXtLatent(pl.LightningModule):
         scheduler_d = optim.lr_scheduler.CosineAnnealingLR(optimizer_d, T_max=config['num_epochs'])     
 
         return [optimizer_g, optimizer_d], [scheduler_g, scheduler_d]
+
+    def on_train_epoch_start(self):
+        self.slow_buffer = []
+        self.current_film = None
+        self.steps_since_slow = 0 

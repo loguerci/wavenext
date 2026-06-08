@@ -7,7 +7,7 @@ Author : Loïs Guerci
 
 from argparse import ArgumentParser
 import os
-from datetime import datetime, date
+from datetime import datetime
 
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelSummary
@@ -57,11 +57,12 @@ def main(hparams):
         shift_dim=config['shift_dim'],
         n_mels=config['n_mels'],
         k=config['k'],
-        lr=config['learning_rate'],
+        lr_g=config['learning_rate_g'],
+        lr_d=config['learning_rate_d'],
         prior=config['prior']
     )
 
-    dataset = WaveNeXtDataset(path_csv=config['dataset'], sample_rate=config['sample_rate'], duration=config['duration'])
+    dataset = WaveNeXtDataset(path_csv=config['dataset'], sample_rate=config['sample_rate'], samples=config['samples'])
     train_size = int(0.8 * len(dataset))
     val_size = int(0.15 * len(dataset))
     test_size = len(dataset) - train_size - val_size
@@ -83,14 +84,14 @@ def main(hparams):
         monitor='val_mel_loss',
         dirpath=f'checkpoints/{formatted}',
         filename='wavenext-{epoch:02d}-{val_mel_loss:.3f}',
-        save_top_k=3,
+        save_top_k=1,
         mode='min',
         every_n_epochs=1
     )
 
     logger = TensorBoardLogger(save_dir=config['log_dir'] + f'/{formatted}', name='wavenext')
 
-    audio = audio_log(dataset=val_dataset, every_n_epochs=10, num_samples=4, sample_rate=config['sample_rate'], prior=config['prior'])
+    audio = audio_log(dataset=val_dataset, every_n_epochs=20, num_samples=4, sample_rate=config['sample_rate'], prior=config['prior'])
 
     trainer = Trainer(accelerator=config['accelerator'], 
                       devices=config['devices'], 
@@ -98,7 +99,7 @@ def main(hparams):
                       logger=logger,
                       callbacks=[ModelSummary(max_depth=2), checkpoint_callback, audio])
     
-    resume_ckpt = '/home/lois/wavenext/checkpoints/14-05_at_04_41_05/wavenext-epoch=281-val_mel_loss=19.164.ckpt'
+    resume_ckpt = '/home/lois/wavenext/checkpoints/29-05_at_02_45_21/wavenext-epoch=03-val_mel_loss=2.246.ckpt'
 
     trainer.fit(model, train_loader, val_loader, ckpt_path=resume_ckpt if config['resume'] else None)
 
