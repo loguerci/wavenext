@@ -3,9 +3,6 @@ Lightning module for WaveNeXt overall architecture using ConvNeXt-based Generato
 Author : Loïs Guerci
 
 """ 
-
-from pyexpat import model
-
 import torch
 import torch.optim as optim
 import yaml
@@ -16,6 +13,7 @@ from .discriminator import MPD, MRD
 from utils.loss import ReconstructionLoss, AdversarialLoss, FeatureMatchingLoss
 from encodec import EncodecModel
 import sys
+from torch_ema import ExponentialMovingAverage
 
 import pytorch_lightning as pl
 
@@ -77,6 +75,8 @@ class WaveNeXtLatent(pl.LightningModule):
 
         self.automatic_optimization = False
 
+        self.ema = ExponentialMovingAverage(self.decoder.parameters(), decay=0.999)
+
     def training_step(self, batch):
 
         x = batch  # (B, 1, T)
@@ -134,6 +134,7 @@ class WaveNeXtLatent(pl.LightningModule):
         self.log('g_loss', total_g_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         total_g_loss.backward()
         optimizer_g.step()
+        self.ema.update()
      
 
     def validation_step(self, batch):
@@ -143,7 +144,8 @@ class WaveNeXtLatent(pl.LightningModule):
             encoded_frames = self.encoder.encode(x)
             codes = torch.cat([f[0] for f in encoded_frames], dim=-1)
             emb = self.encoder.quantizer.decode(codes.transpose(0, 1))
-            fake = self.decoder(emb)
+            with self.ema.average_parameters():
+                fake = self.decoder(emb)
 
         # Just log some metrics, no backward
         fake_mel = self.mel_extractor(fake)

@@ -15,7 +15,7 @@ from .decoder import Cond_Decoder, Decoder
 from .discriminator import MPD, MRD
 from utils.loss import ReconstructionLoss, AdversarialLoss, FeatureMatchingLoss
 from encodec import EncodecModel
-from .slow_branch import SlowBranch
+from .slow_branch import Naive_SlowBranch, Transformer_SlowBranch
 import sys
 
 import pytorch_lightning as pl
@@ -54,7 +54,7 @@ class WaveNeXtSlowFast(pl.LightningModule):
             inter_channels=self.dim * self.k,
             num_blocks=8)
         
-        self.slow_branch = SlowBranch(latent_dim=128, film_dim=self.dim)
+        self.slow_branch = Naive_SlowBranch(latent_dim=128, film_dim=self.dim)
 
         self.discriminator_mpd = MPD()
         self.discriminator_mrd = MRD()
