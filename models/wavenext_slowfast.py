@@ -15,7 +15,7 @@ from .decoder import Cond_Decoder, Decoder
 from .discriminator import MPD, MRD
 from utils.loss import ReconstructionLoss, AdversarialLoss, FeatureMatchingLoss
 from encodec import EncodecModel
-from .slow_branch import Naive_SlowBranch, Transformer_SlowBranch
+from .slow_branch import Naive_SlowBranch
 import sys
 
 import pytorch_lightning as pl
@@ -76,8 +76,8 @@ class WaveNeXtSlowFast(pl.LightningModule):
         self.feature_matching_loss = FeatureMatchingLoss()
 
         # Weights for losses
-        self.w_mrd = 0.3
-        self.w_mel = 15.0
+        self.w_mrd = 0.1
+        self.w_mel = 45.0
 
         self.automatic_optimization = False
 

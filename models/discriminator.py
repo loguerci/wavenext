@@ -36,10 +36,8 @@ class MPD(nn.Module):
     def forward(self, x):
         fmaps = []
         outputs = []
-        for period in self.periods:
-            one_period = self.discriminators[self.periods.index(period)]
-            one_period.to(x.device)
-            fmap, out = one_period(period_reshape(x, period))
+        for i, (period, disc) in enumerate(zip(self.periods, self.discriminators)):
+            fmap, out = disc(period_reshape(x, period))
             fmaps.append(fmap)
             outputs.append(out)
         return fmaps, outputs
@@ -103,9 +101,8 @@ class MRD(nn.Module):
         outputs = []
         for i in range(len(self.fft_sizes)):
             one_resolution = self.discriminators[i]
-            one_resolution.to(x.device)
             fmaps, out = one_resolution(x)
-            fmap.extend(fmaps)
+            fmap.append(fmaps)
             outputs.append(out)
         return fmap, outputs
 
@@ -136,6 +133,63 @@ class OneResolution(nn.Module):
             fmap.append(x)
         x = self.conv2(x)
         return fmap, x
+
+class MSSTFTDiscriminator(nn.Module):
+    """
+    Multi-Scale STFT Discriminator from EnCodec.
+    Operates on complex STFT: processes real and imaginary parts jointly.
+    """
+    def __init__(self,
+                 fft_sizes=[2048, 1024, 512, 256, 128],
+                 hop_lengths=[512, 256, 128, 64, 32],
+                 win_lengths=[2048, 1024, 512, 256, 128]):
+        super().__init__()
+        self.discriminators = nn.ModuleList([
+            OneScaleSTFT(n, h, w)
+            for n, h, w in zip(fft_sizes, hop_lengths, win_lengths)
+        ])
+
+    def forward(self, x):
+        fmaps, outputs = [], []
+        for disc in self.discriminators:
+            fmap, out = disc(x)
+            fmaps.append(fmap)
+            outputs.append(out)
+        return fmaps, outputs
+
+
+class OneScaleSTFT(nn.Module):
+    def __init__(self, fft_size, hop_length, win_length):
+        super().__init__()
+        self.fft_size = fft_size
+        self.hop_length = hop_length
+        self.win_length = win_length
+        self.conv = nn.ModuleList([
+            weight_norm(nn.Conv2d(2, 32, (3, 9), padding=(1, 4))), 
+            weight_norm(nn.Conv2d(32, 32, (3, 9), (1, 2), padding=(1, 4))),
+            weight_norm(nn.Conv2d(32, 32, (3, 9), (1, 2), padding=(1, 4))),
+            weight_norm(nn.Conv2d(32, 32, (3, 9), (1, 2), padding=(1, 4))),
+            weight_norm(nn.Conv2d(32, 32, (3, 3), padding=(1, 1))),
+        ])
+        self.conv_post = weight_norm(nn.Conv2d(32, 1, 3, 1, 1))
+        self.leaky_relu = nn.LeakyReLU(0.2)
+
+    def forward(self, x):
+        # x: (B, 1, T)
+        x = x.squeeze(1)  # (B, T)
+        with torch.no_grad():
+            window = torch.hann_window(self.win_length, device=x.device)
+            stft = torch.stft(x, self.fft_size, self.hop_length,
+                              self.win_length, window,
+                              return_complex=True)  # (B, F, T_frames)
+            # Stack real and imaginary as channels
+            x = torch.stack([stft.real, stft.imag], dim=1)  # (B, 2, F, T_frames)
+        fmap = []
+        for conv in self.conv:
+            x = self.leaky_relu(conv(x))
+            fmap.append(x)
+        return fmap, self.conv_post(x)
+
     
 if "__main__" == __name__:
     x = torch.randn(1, 1, 24000*1)
@@ -170,4 +224,21 @@ if "__main__" == __name__:
     # Print feature map shapes
     print("MRD FMAP shapes:")
     for i in range(len(fmaps)):
-        print(f"  Layer {i}: {fmaps[i].shape}")
+        print(f"  Scale {i}:")
+        for j, fmap in enumerate(fmaps[i]):
+            print(f"    Layer {j}: {fmap.shape}")
+
+
+    model = MSSTFTDiscriminator()
+    fmaps, out = model(x)   
+
+    # Print output shapes
+    print("MSSTFT Discriminator output shapes:")
+    for i in range(len(out)):
+        print(f"  Scale {i}: {out[i].shape}")
+    # Print feature map shapes
+    print("MSSTFT Discriminator FMAP shapes:")
+    for i in range(len(fmaps)):
+        print(f"  Scale {i}:")
+        for j, fmap in enumerate(fmaps[i]):
+            print(f"    Layer {j}: {fmap.shape}")

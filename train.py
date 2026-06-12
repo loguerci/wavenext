@@ -4,15 +4,24 @@ Author : Loïs Guerci
 
 """
 
+import os
+os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 from argparse import ArgumentParser
-import os
 from datetime import datetime
 
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelSummary
 from pytorch_lightning.loggers import TensorBoardLogger
 import torch
+
+_load_kept = torch.load
+def _trusted_load(*args, **kwargs):
+    kwargs['weights_only'] = False
+    return _load_kept(*args, **kwargs)
+torch.load = _trusted_load
+
 from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.utils.data import random_split
 
@@ -24,7 +33,6 @@ from audio_log import audio_log
 
 import yaml
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 
 def load_config(config_path):
@@ -39,16 +47,6 @@ def main(hparams):
 
     torch.set_float32_matmul_precision('high')
     config = load_config(hparams.config_path)
-
-    #model = WaveNeXt(
-    #    dim=config['dim'],
-    #    sample_rate=config['sample_rate'],
-    #    fft_dim=config['fft_dim'],
-    #    shift_dim=config['shift_dim'],
-    #    n_mels=config['n_mels'],
-    #    k=config['k'],
-    #    lr=config['learning_rate']
-    #)
 
     model = WaveNeXtLatent(
         dim=config['dim'],
@@ -79,6 +77,11 @@ def main(hparams):
     train_loader = DataLoader(train_dataset, batch_size=config['batch_size'], shuffle=True, num_workers=config['num_workers'])
     val_loader = DataLoader(val_dataset, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'])
     test_loader = DataLoader(test_dataset, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'])
+
+    if model.fd:
+        print("Precomputing real stats for FD loss...")
+        model.precompute_real_stats(train_loader)
+        print("Real stats precomputed.")
 
     checkpoint_callback = ModelCheckpoint(
         monitor='val_mel_loss',

@@ -1,6 +1,6 @@
 import torch.nn as nn
 from .blocks import ConvNeXtcausal
-from .slow_branch import CrossAttentionConditioning
+from .slow_branch import CrossAttention
 
 class Decoder(nn.Module):
     def __init__(self, in_channels: int, dim: int, shift_dim: int, inter_channels: int, num_blocks: int):
@@ -72,7 +72,7 @@ class CrossA_Decoder(nn.Module):
         self.blocks = nn.ModuleList([ConvNeXtcausal(dim, inter_channels) for _ in range(num_blocks)])
         self.linear1 = nn.Linear(dim, dim)
         self.linear2 = nn.Linear(dim, shift_dim, bias=False) 
-        self.cross_a = CrossAttentionConditioning(dim)
+        self.cross_a = CrossAttention(dim)
         # (B, shift_dim, T) -> (B, 1 , shift_dim * T)
     
     def forward(self, x, cond):
@@ -82,11 +82,11 @@ class CrossA_Decoder(nn.Module):
         x = x.transpose(1, 2)  # (B, T, dim)
         x = self.norm(x)
         x = x.transpose(1, 2)  # (B, dim, T)
-        x = self.cross_attn(x, K, V)  
+        x = self.cross_a(x, K, V)  
 
         for block in self.blocks:
             x = block(x)
-            x = self.cross_attn(x, K, V)  
+            x = self.cross_a(x, K, V)  
 
         x = x.transpose(1, 2)  # (B, T, dim)
         x = self.linear1(x)
