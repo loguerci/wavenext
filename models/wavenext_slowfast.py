@@ -11,11 +11,11 @@ import torch.optim as optim
 import yaml
 
 from utils.mel import MelSpectra
-from .decoder import Cond_Decoder, Decoder
+from .decoder import CrossA_Decoder
 from .discriminator import MPD, MRD
 from utils.loss import ReconstructionLoss, AdversarialLoss, FeatureMatchingLoss
 from encodec import EncodecModel
-from .slow_branch import Naive_SlowBranch
+from .slow_branch import Transformer_SlowBranch
 import sys
 
 import pytorch_lightning as pl
@@ -27,7 +27,7 @@ def load_config(config_path):
 
 
 class WaveNeXtSlowFast(pl.LightningModule):
-    def __init__(self, dim: int, sample_rate: int, fft_dim: int, shift_dim: int, n_mels: int, k: int, lr_g: float, lr_d: float, prior: str, slow_size: int, r_factor: int):
+    def __init__(self, dim: int, sample_rate: int, fft_dim: int, shift_dim: int, n_mels: int, k: int, lr_g: float, lr_d: float, prior: str, slow_size: int, r_factor: int, delay: int):
         super().__init__()
 
         self.sample_rate = sample_rate
@@ -40,21 +40,23 @@ class WaveNeXtSlowFast(pl.LightningModule):
         self.lr_d = lr_d
         self.prior = prior
 
-        self.slow_buffer = []
         self.slow_size = slow_size
-        self.r_factor = r_factor
-        self.steps_since_slow = 0
-        self.current_film = None
+        self.r_factor = r_factor # reuse factor 
+        self.delay = delay # delay steps of slow windows
+
+        self.K_init = torch.nn.Parameter(torch.zeros(self.slow_size, self.dim))
+        self.V_init = torch.nn.Parameter(torch.zeros(self.slow_size, self.dim))
 
         # Model components
-        self.decoder = Cond_Decoder(
+        self.decoder = CrossA_Decoder(
             in_channels=self.n_mels,
             dim=self.dim,
             shift_dim=self.shift_dim,
             inter_channels=self.dim * self.k,
             num_blocks=8)
         
-        self.slow_branch = Naive_SlowBranch(latent_dim=128, film_dim=self.dim)
+        #self.slow_branch = Naive_SlowBranch(latent_dim=128, film_dim=self.dim)
+        self.slow_branch = Transformer_SlowBranch(latent_dim=slow_size, dim=self.dim)
 
         self.discriminator_mpd = MPD()
         self.discriminator_mrd = MRD()
@@ -85,6 +87,9 @@ class WaveNeXtSlowFast(pl.LightningModule):
 
         x = batch  # (B, 1, T)
         sequence_length = x.size(2)
+        conds = [(self.K_init, self.V_init)] * N
+        windows = []
+        j = self.slow_size
   
         optimizer_g, optimizer_d = self.optimizers()
 
@@ -92,24 +97,29 @@ class WaveNeXtSlowFast(pl.LightningModule):
             with torch.no_grad():
                 encoded_frames = self.encoder.encode(x)
                 codes = torch.cat([f[0] for f in encoded_frames], dim=-1)
-                emb = self.encoder.quantizer.decode(codes.transpose(0, 1))
+                emb = self.encoder.quantizer.decode(codes.transpose(0, 1)) # (B, D, N)
 
-        self.slow_buffer.append(emb.detach())
-        if len(self.slow_buffer) > self.slow_size:
-            self.slow_buffer.pop(0)
+        N = emb.size(2)
+        fast_chunks = list(emb.split(1, dim=2))
 
-        if len(self.slow_buffer) == self.slow_size:
-            if self.current_film is None or self.steps_since_slow >= self.r_factor:
-                slow_chunk = torch.cat(self.slow_buffer, dim=2)
-                slow_chunk = slow_chunk.transpose(1, 2)  # (B, slow_size, latent_dim)
-                gamma, beta = self.slow_branch(slow_chunk)
-                self.current_film = (gamma, beta)
-                self.steps_since_slow = 0
-            else:
-                self.steps_since_slow += 1
+        # defining slow windows and the conditioned fast chunks for the current input
+        while j + self.delay + self.r_factor - 1 < N:
+            slow_window = (j-self.slow_size, j)
+            cond_chunks = (j + self.delay, j + self.delay + self.r_factor)
+            windows.append((slow_window, cond_chunks))
+            j += self.r_factor
 
-        fake = self.decoder(emb, self.current_film)  # (B, shift_dim * T)
-        fake = fake.unsqueeze(1)  # (B, shift_dim * T) -> (B, 1, shift_dim * T)
+        # processing all slow chunks and storing conditioning outputs
+        for slow_start, slow_end, cond_start, cond_end in windows:
+            slow_chunk = emb[:, :, slow_start:slow_end].transpose(1, 2)
+            cond = self.slow_branch(slow_chunk)
+            for t in range(cond_start, cond_end):
+                conds[t] = cond
+        
+        # processing all fast chunks with their corresponding conditioning
+        fake_chunks = [self.decoder(fast_chunks[t], conds[t]) for t in range(N)]   
+        fake = torch.cat(fake_chunks, dim=-1).unsqueeze(1)  # (B, 1, T)
+        fake = fake[:, :, :sequence_length]
 
         # Discriminator step
         optimizer_d.zero_grad()
@@ -162,12 +172,36 @@ class WaveNeXtSlowFast(pl.LightningModule):
 
     def validation_step(self, batch):
         x = batch
+        conds = [(self.K_init, self.V_init)] * N
+        windows = []
+        j = self.slow_size
 
         with torch.no_grad():
             encoded_frames = self.encoder.encode(x)
             codes = torch.cat([f[0] for f in encoded_frames], dim=-1)
             emb = self.encoder.quantizer.decode(codes.transpose(0, 1))
-            fake = self.decoder(emb)
+
+            N = emb.size(2)
+            fast_chunks = list(emb.split(1, dim=2))
+
+            # defining slow windows and the conditioned fast chunks for the current input
+            while j + self.delay + self.r_factor - 1 < N:
+                slow_window = (j-self.slow_size, j)
+                cond_chunks = (j + self.delay, j + self.delay + self.r_factor)
+                windows.append((slow_window, cond_chunks))
+                j += self.r_factor
+
+            # processing all slow chunks and storing conditioning outputs
+            for slow_start, slow_end, cond_start, cond_end in windows:
+                slow_chunk = emb[:, :, slow_start:slow_end].transpose(1, 2)
+                cond = self.slow_branch(slow_chunk)
+                for t in range(cond_start, cond_end):
+                    conds[t] = cond
+            
+            # processing all fast chunks with their corresponding conditioning
+            fake_chunks = [self.decoder(fast_chunks[t], conds[t]) for t in range(N)]   
+            fake = torch.cat(fake_chunks, dim=-1).unsqueeze(1)  # (B, 1, T)
+            fake = fake[:, :, :x.size(2)]
 
         # Just log some metrics, no backward
         fake_mel = self.mel_extractor(fake)
@@ -182,7 +216,8 @@ class WaveNeXtSlowFast(pl.LightningModule):
 
         config = load_config('config_48k.yaml')
 
-        optimizer_g = optim.AdamW(list(self.decoder.parameters()) + list(self.slow_branch.parameters()), lr=self.lr_g, betas=(0.9, 0.999))
+        optimizer_g = optim.AdamW(list(self.decoder.parameters()) + list(self.slow_branch.parameters()) 
+                                  + [self.K_init, self.V_init], lr=self.lr_g, betas=(0.9, 0.999))
         optimizer_d = optim.AdamW(list(self.discriminator_mpd.parameters())
                                    + list(self.discriminator_mrd.parameters()), lr=self.lr_d, betas=(0.9, 0.999))
         
@@ -190,8 +225,3 @@ class WaveNeXtSlowFast(pl.LightningModule):
         scheduler_d = optim.lr_scheduler.CosineAnnealingLR(optimizer_d, T_max=config['num_epochs'])     
 
         return [optimizer_g, optimizer_d], [scheduler_g, scheduler_d]
-
-    def on_train_epoch_start(self):
-        self.slow_buffer = []
-        self.current_film = None
-        self.steps_since_slow = 0 

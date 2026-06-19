@@ -3,10 +3,13 @@ Lightning module for WaveNeXt overall architecture using ConvNeXt-based Generato
 Author : Loïs Guerci
 
 """ 
+import os
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import yaml
+import sys
 
 from utils.mel import MelSpectra
 from utils.fadtk_emb import FADTKEmbedding
@@ -58,6 +61,10 @@ class WaveNeXtLatent(pl.LightningModule):
         if self.prior == "encodec":
             self.encoder = EncodecModel.encodec_model_24khz()
             self.encoder.set_target_bandwidth(6.0)
+        elif self.prior == "same":
+            sys.path.append('../stable-audio-3')
+            from stable_audio_3 import AutoencoderModel
+            self.encoder = AutoencoderModel.from_pretrained("same-s")
 
         self.mel_extractor = MelSpectra(
             sample_rate=self.sample_rate,
@@ -74,14 +81,14 @@ class WaveNeXtLatent(pl.LightningModule):
         # Weights for losses
         self.w_mrd = 0.1
         self.w_mel = 45.0
-        self.w_msstft = 0.2
+        self.w_msstft = 0.5
 
         self.automatic_optimization = False
 
         self.warmup_epochs = 20
 
         # for FD loss computation
-        self.fd = True # Set to True to enable Fréchet Distance loss
+        self.fd = False # Set to True to enable Fréchet Distance loss
         self.fd_weight = 1.0
         self.fd_norm_c = 0.01
         self.fd_loss_balance_beta = 0.99
@@ -121,11 +128,21 @@ class WaveNeXtLatent(pl.LightningModule):
         self.ema_decay = ema_decay
 
     @torch.no_grad()
-    def precompute_real_stats(self, real_dataloader, n_batches: int = 64):
+    def precompute_real_stats(self, real_dataloader, n_batches: int = 64, cache_path: str = "fd_stats.pt"):
         """
         Compute per-embedder (mu_r, sig_r, sig_r_sqrt) from real audio.
         Call this before trainer.fit().
         """
+        if os.path.exists(cache_path):
+            print(f"Loading cached FD stats from {cache_path}")
+            stats = torch.load(cache_path, weights_only=True)
+            for idx in range(len(self.embedders)):
+                getattr(self, f"mu_r_{idx}").copy_(stats[f"mu_r_{idx}"])
+                getattr(self, f"sig_r_{idx}").copy_(stats[f"sig_r_{idx}"])
+                getattr(self, f"sig_r_sqrt_{idx}").copy_(stats[f"sig_r_sqrt_{idx}"])
+            print("FD stats loaded from cache.")
+            return
+        
         print("Precomputing real audio FD statistics...")
         n_embedders = len(self.embedders)
         sums   = [None] * n_embedders
@@ -232,18 +249,18 @@ class WaveNeXtLatent(pl.LightningModule):
         if not self.fd:
             return
 
-        # Precompute real stats if not already done
+        if not hasattr(self, '_train_dl') or self._train_dl is None:
+            raise RuntimeError(
+                "Set model._train_dl = train_loader before trainer.fit()"
+            )
+
         all_zeros = all(
             getattr(self, f"mu_r_{i}").abs().sum().item() == 0
             for i in range(len(self.embedders))
         )
         if all_zeros:
-            train_dl = self.trainer.train_dataloader
-            if callable(train_dl):
-                train_dl = train_dl()
-            self.precompute_real_stats(train_dl)
+            self.precompute_real_stats(self._train_dl)
 
-        # Warm-start the generated EMA with a few batches
         already_warm = any(
             getattr(self, f"ema_count_{i}").item() > 0
             for i in range(len(self.embedders))
@@ -252,20 +269,15 @@ class WaveNeXtLatent(pl.LightningModule):
             return
 
         print("Warm-starting FD EMA from generated audio...")
-        train_dl = self.trainer.train_dataloader
-        if callable(train_dl):
-            train_dl = train_dl()
-
         self.eval()
         with torch.no_grad():
-            for i, batch in enumerate(train_dl):
+            for i, batch in enumerate(self._train_dl):
                 if i >= self.fd_warm_batches:
                     break
                 x = batch.to(self.device)
-                with torch.no_grad():
-                    encoded_frames = self.encoder.encode(x)
-                    codes = torch.cat([f[0] for f in encoded_frames], dim=-1)
-                    emb = self.encoder.quantizer.decode(codes.transpose(0, 1))
+                encoded_frames = self.encoder.encode(x)
+                codes = torch.cat([f[0] for f in encoded_frames], dim=-1)
+                emb = self.encoder.quantizer.decode(codes.transpose(0, 1))
                 fake = self.decoder(emb).unsqueeze(1)[:, :, :x.size(2)]
                 audio = fake.squeeze(1)
 

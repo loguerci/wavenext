@@ -79,9 +79,7 @@ def main(hparams):
     test_loader = DataLoader(test_dataset, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'])
 
     if model.fd:
-        print("Precomputing real stats for FD loss...")
-        model.precompute_real_stats(train_loader)
-        print("Real stats precomputed.")
+        model._train_dl = train_loader
 
     checkpoint_callback = ModelCheckpoint(
         monitor='val_mel_loss',
