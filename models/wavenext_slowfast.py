@@ -122,6 +122,8 @@ class WaveNeXtSlowFast(pl.LightningModule):
 
         cond = self.slow_branch(slow_chunk)
         fake = self.decoder(fast_chunk, cond)
+        fake = fake.unsqueeze(1) 
+        fake = fake[:, :, :x_fast.size(2)]
 
         fake_detached = fake.detach() 
 

@@ -6,7 +6,7 @@ Author : Loïs Guerci
 
 import os
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 from argparse import ArgumentParser
 from datetime import datetime
