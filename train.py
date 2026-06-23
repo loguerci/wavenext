@@ -25,14 +25,14 @@ torch.load = _trusted_load
 from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.utils.data import random_split
 
-from models.wavenext import WaveNeXt
 from models.wavenext_prior import WaveNeXtLatent
+from models.wavenext_slowfast import WaveNeXtSlowFast
 from torch.utils.data import DataLoader
 from dataloader import WaveNeXtDataset
 from audio_log import audio_log
+from audio_log_slowfast import audio_log_slowfast
 
 import yaml
-
 
 
 def load_config(config_path):
@@ -48,17 +48,31 @@ def main(hparams):
     torch.set_float32_matmul_precision('high')
     config = load_config(hparams.config_path)
 
-    model = WaveNeXtLatent(
-        dim=config['dim'],
-        sample_rate=config['sample_rate'],
-        fft_dim=config['fft_dim'],
-        shift_dim=config['shift_dim'],
-        n_mels=config['n_mels'],
-        k=config['k'],
-        lr_g=config['learning_rate_g'],
-        lr_d=config['learning_rate_d'],
-        prior=config['prior']
-    )
+    if config['cond']:
+        model = WaveNeXtSlowFast(
+            dim=config['dim'],
+            sample_rate=config['sample_rate'],
+            fft_dim=config['fft_dim'],
+            shift_dim=config['shift_dim'],
+            n_mels=config['n_mels'],
+            k=config['k'],
+            lr_g=config['learning_rate_g'],
+            lr_d=config['learning_rate_d'],
+            prior=config['prior'],
+            s_branch=config['s_branch']
+        )
+    else:
+        model = WaveNeXtLatent(
+            dim=config['dim'],
+            sample_rate=config['sample_rate'],
+            fft_dim=config['fft_dim'],
+            shift_dim=config['shift_dim'],
+            n_mels=config['n_mels'],
+            k=config['k'],
+            lr_g=config['learning_rate_g'],
+            lr_d=config['learning_rate_d'],
+            prior=config['prior']
+        )
 
     dataset = WaveNeXtDataset(path_csv=config['dataset'], sample_rate=config['sample_rate'], samples=config['samples'])
     train_size = int(0.8 * len(dataset))
@@ -78,8 +92,9 @@ def main(hparams):
     val_loader = DataLoader(val_dataset, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'])
     test_loader = DataLoader(test_dataset, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'])
 
-    if model.fd:
-        model._train_dl = train_loader
+    if config['cond'] == False:
+        if model.fd:
+            model._train_dl = train_loader
 
     checkpoint_callback = ModelCheckpoint(
         monitor='val_mel_loss',
@@ -92,7 +107,10 @@ def main(hparams):
 
     logger = TensorBoardLogger(save_dir=config['log_dir'] + f'/{formatted}', name='wavenext')
 
-    audio = audio_log(dataset=val_dataset, every_n_epochs=20, num_samples=4, sample_rate=config['sample_rate'], prior=config['prior'])
+    if config['cond']:
+        audio = audio_log_slowfast(dataset=val_dataset, every_n_epochs=20, num_samples=4, sample_rate=config['sample_rate'], prior=config['prior'])
+    else:
+        audio = audio_log(dataset=val_dataset, every_n_epochs=20, num_samples=4, sample_rate=config['sample_rate'], prior=config['prior'])
 
     trainer = Trainer(accelerator=config['accelerator'], 
                       devices=config['devices'], 
@@ -100,14 +118,14 @@ def main(hparams):
                       logger=logger,
                       callbacks=[ModelSummary(max_depth=2), checkpoint_callback, audio])
     
-    resume_ckpt = '/home/lois/wavenext/checkpoints/29-05_at_02_45_21/wavenext-epoch=03-val_mel_loss=2.246.ckpt'
+    resume_ckpt = '/home/lois/wavenext/checkpoints/12-06_at_09_16_17/wavenext-epoch=220-val_mel_loss=0.869.ckpt'
 
     trainer.fit(model, train_loader, val_loader, ckpt_path=resume_ckpt if config['resume'] else None)
 
 if __name__ == "__main__":
     # python train.py --config_path config_encodec_24.yaml
     parser = ArgumentParser()
-    parser.add_argument('--config_path', type=str, default='config_48k.yaml', help='Path to config file')
+    parser.add_argument('--config_path', type=str, default='config_slowfast_24k.yaml', help='Path to config file')
     hparams = parser.parse_args()
 
     main(hparams)

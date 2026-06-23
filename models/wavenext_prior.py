@@ -404,7 +404,8 @@ class WaveNeXtLatent(pl.LightningModule):
 
         optimizer_g = optim.AdamW(self.decoder.parameters(), lr=self.lr_g, betas=(0.9, 0.999))
         optimizer_d = optim.AdamW(list(self.discriminator_mpd.parameters())
-                                   + list(self.discriminator_mrd.parameters()), lr=self.lr_d, betas=(0.9, 0.999))
+                                   + list(self.discriminator_mrd.parameters())
+                                   + list(self.discriminator_msstft.parameters()), lr=self.lr_d, betas=(0.9, 0.999))
         
         scheduler_g = optim.lr_scheduler.CosineAnnealingLR(optimizer_g, T_max=config['num_epochs'])
         scheduler_d = optim.lr_scheduler.CosineAnnealingLR(optimizer_d, T_max=config['num_epochs'])     

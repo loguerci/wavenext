@@ -1,30 +1,38 @@
 # Config file for training WaveNeXt model
 
-duration: 1
+samples: 72000 # 3s
+#samples: 320
 
 # Model hyperparameters
 #sample_rate: 48000 
-sample_rate: 48000
+sample_rate: 24000
 
 #fft_dim: 2048
-fft_dim: 2048
+fft_dim: 1024
 
 dim: 512
 
-shift_dim: 512
-n_mels: 100
+#shift_dim: 512
+shift_dim: 320
+n_mels: 128
 k: 3
 
 # Training hyperparameters
 batch_size: 8
 num_workers: 16
 num_epochs: 1000
-learning_rate: 0.0002
+learning_rate_g: 0.0002
+learning_rate_d: 0.0001
 log_dir: "logs"
 
 accelerator: "cuda"
 devices: 1
 
-dataset: "data/kentaro_dataset.csv"
+dataset: "data/bigyuki_dataset.csv"
 
 resume: false
+
+prior: "encodec"  # or "same"
+s_branch: "transformer"
+
+cond: true

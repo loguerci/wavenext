@@ -30,6 +30,9 @@ devices: 1
 
 dataset: "data/bigyuki_dataset.csv"
 
-resume: false
+resume: true
 
 prior: "encodec"  # or "same"
+s_branch: "gru"
+
+cond: false
