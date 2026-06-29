@@ -11,11 +11,12 @@ import torch.optim as optim
 import yaml
 
 from utils.mel import MelSpectra
-from .decoder import CrossA_Decoder, Cond_Decoder, Decoder
+from .decoder import CrossA_Decoder, Cond_Decoder
+from .generator import Generator
 from .discriminator import MPD, MRD, MSSTFTDiscriminator
 from utils.loss import ReconstructionLoss, AdversarialLoss, FeatureMatchingLoss
 from encodec import EncodecModel
-from .slow_branch import Transformer_SlowBranch, Naive_SlowBranch
+from .slow_branch import Transformer_SlowBranch, GRU_SlowBranch
 
 import pytorch_lightning as pl
 
@@ -57,7 +58,7 @@ class WaveNeXtSlowFast(pl.LightningModule):
                 inter_channels=self.dim * self.k,
                 num_blocks=4)
             
-            self.slow_branch = Transformer_SlowBranch(latent_dim=150, dim=self.dim)
+            self.slow_branch = Transformer_SlowBranch(latent_dim=self.n_mels, dim=self.dim)
         elif s_branch == 'gru':
             self.decoder = Cond_Decoder(
                 in_channels=self.n_mels,
@@ -66,14 +67,14 @@ class WaveNeXtSlowFast(pl.LightningModule):
                 inter_channels=self.dim * self.k,
                 num_blocks=8) 
 
-            self.slow_branch = Naive_SlowBranch(latent_dim=150, film_dim=self.dim)
-        else:
-            self.decoder = Decoder(
-                in_channels=self.n_mels,
-                dim=self.dim,
-                shift_dim=self.shift_dim,
-                inter_channels=self.dim * self.k,
-                num_blocks=4)
+            self.slow_branch = GRU_SlowBranch(latent_dim=self.n_mels, film_dim=self.dim)
+
+        self.generator = Generator(
+            in_channels=self.n_mels,
+            dim=self.dim,
+            shift_dim=256,
+            inter_channels=self.dim * self.k,
+            num_blocks=8)
 
         self.discriminator_mpd = MPD()
         self.discriminator_mrd = MRD()
@@ -86,7 +87,7 @@ class WaveNeXtSlowFast(pl.LightningModule):
         self.mel_extractor = MelSpectra(
             sample_rate=self.sample_rate,
             n_fft=self.fft_dim,
-            hop_length=self.shift_dim,
+            hop_length=256,
             n_mels=self.n_mels
         )
 
@@ -98,7 +99,7 @@ class WaveNeXtSlowFast(pl.LightningModule):
         # Weights for losses
         self.w_mrd = 0.1
         self.w_mel = 45.0
-        self.w_msstft = 0.5
+        self.w_msstft = 0.25
 
         self.automatic_optimization = False
         self.warmup_epochs = 20
@@ -106,21 +107,22 @@ class WaveNeXtSlowFast(pl.LightningModule):
     def training_step(self, batch):
 
         x = batch  # (B, 1, T)
-        x_fast = x[:, :, int(x.size(2)*(2/3)):]
+        split = int(x.size(2)*(2/3))
+        x_fast = x[:, :, split:]
+        x_slow = x[:, :, :split]
   
         optimizer_g, optimizer_d = self.optimizers()
 
         if self.prior == "encodec":
             with torch.no_grad():
-                encoded_frames = self.encoder.encode(x)
+                encoded_frames = self.encoder.encode(x_fast)
                 codes = torch.cat([f[0] for f in encoded_frames], dim=-1)
                 emb = self.encoder.quantizer.decode(codes.transpose(0, 1)) # (B, D, N)
 
-        latent_length = emb.size(2)
-        slow_chunk = emb[:, :, :int(latent_length*(2/3))]
-        fast_chunk = emb[:, :, slow_chunk.size(2):]
+        slow_chunk = self.mel_extractor(x_slow).squeeze(1)
+        fast_chunk = emb
 
-        cond = self.slow_branch(slow_chunk)
+        cond = self.slow_branch(slow_chunk.transpose(1,2))
         fake = self.decoder(fast_chunk, cond)
         fake = fake.unsqueeze(1) 
         fake = fake[:, :, :x_fast.size(2)]
@@ -185,24 +187,26 @@ class WaveNeXtSlowFast(pl.LightningModule):
 
     def validation_step(self, batch):
         x = batch
-        x_fast = x[:, :, int(x.size(2)*(2/3)):]
+        split = int(x.size(2)*(2/3))
+        x_fast = x[:, :, split:]
+        x_slow = x[:, :, :split]
 
         with torch.no_grad():
-            encoded_frames = self.encoder.encode(x)
+            encoded_frames = self.encoder.encode(x_fast)
             codes = torch.cat([f[0] for f in encoded_frames], dim=-1)
             emb = self.encoder.quantizer.decode(codes.transpose(0, 1)) # (B, D, N)
 
-            latent_length = emb.size(2)
-            slow_chunk = emb[:, :, :int(latent_length*(2/3))]
-            fast_chunk = emb[:, :, slow_chunk.size(2):]
+            fast_chunk = emb
+            slow_chunk = self.mel_extractor(x_slow).squeeze(1)
 
-            cond = self.slow_branch(slow_chunk)
+            cond = self.slow_branch(slow_chunk.transpose(1,2))
             fake = self.decoder(fast_chunk, cond)
+            fake = fake.unsqueeze(1) 
+            fake = fake[:, :, :x_fast.size(2)]
 
         # Just log some metrics, no backward
-        fake_mel = self.mel_extractor(fake)
-        fake_mel.squeeze_(1)
-        mel_loss = self.reconstruction_loss(fake_mel, self.mel_extractor(x_fast).squeeze(1))
+        mel_fake = self.mel_extractor(fake).squeeze(1)
+        mel_loss = self.reconstruction_loss(mel_fake, self.mel_extractor(x_fast).squeeze(1))
         self.log('val_mel_loss', mel_loss, on_epoch=True, prog_bar=True, sync_dist=True)
 
     def test_step(self, batch):

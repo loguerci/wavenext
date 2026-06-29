@@ -3,6 +3,8 @@
 samples: 72000 # 3s
 #samples: 320
 
+#delay: 0
+
 # Model hyperparameters
 #sample_rate: 48000 
 sample_rate: 24000
@@ -18,7 +20,7 @@ n_mels: 128
 k: 3
 
 # Training hyperparameters
-batch_size: 4
+batch_size: 8
 num_workers: 16
 num_epochs: 1000
 learning_rate_g: 0.0002
@@ -29,8 +31,9 @@ accelerator: "cuda"
 devices: 1
 
 dataset: "data/bigyuki_dataset.csv"
+#dataset: "data/test.csv"
 
-resume: false
+resume: true
 
 prior: "encodec"  # or "same"
 #s_branch: "gru"

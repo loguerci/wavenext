@@ -27,8 +27,8 @@ class MelSpectra(nn.Module):
     
 
 if "__main__" == __name__:
-    x = torch.randn(2, 1, 24000*5)
-    mel_extractor = MelSpectra()
+    x = torch.randn(1, 1, 24000*2)
+    mel_extractor = MelSpectra(sample_rate=24000, n_fft=1024, hop_length=256, n_mels=128)
     mel = mel_extractor(x)
     mel.squeeze_(1) # (B, n_mels, T)
     print(mel.shape)

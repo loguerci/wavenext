@@ -26,7 +26,10 @@ class audio_log_slowfast(pl.Callback):
             self.encoder = EncodecModel.encodec_model_24khz()
             self.encoder.set_target_bandwidth(6.0)
 
-        self.mel_extractor = MelSpectra(sample_rate=self.config['sample_rate'], n_fft=self.config['fft_dim'], hop_length=self.config['shift_dim'], n_mels=self.config['n_mels'])
+        self.mel_extractor = MelSpectra(sample_rate=self.config['sample_rate'], 
+                                        n_fft=self.config['fft_dim'], 
+                                        hop_length=256, 
+                                        n_mels=self.config['n_mels'])
 
     def on_validation_epoch_end(self, trainer, pl_module):
         epoch = trainer.current_epoch
@@ -39,19 +42,30 @@ class audio_log_slowfast(pl.Callback):
         pl_module.eval()
         with torch.no_grad():
             for i in range(self.num_samples):
-                x_fast = self.dataset[i][:, int((self.dataset[i]).size(1)*(2/3)):]
+                x = self.dataset[i]
+                split = int(x.size(1)*(2/3))
+                x = x.unsqueeze(1)
+                x_fast = x[:, :, split:]
+                x_slow = x[:, :, :split]
 
-                encoded_frames = self.encoder.encode(self.dataset[i].unsqueeze(0))
+                #print(x_fast.shape)
+                #print(x_slow.shape)
+
+                encoded_frames = self.encoder.encode(x_fast)
                 codes = torch.cat([f[0] for f in encoded_frames], dim=-1)
-                emb = self.encoder.quantizer.decode(codes.transpose(0, 1))
+                fast_chunk = self.encoder.quantizer.decode(codes.transpose(0, 1))
 
+                slow_chunk = self.mel_extractor(x_slow).squeeze(1)
 
-                latent_length = emb.size(2)
-                slow_chunk = emb[:, :, :int(latent_length*(2/3))]
-                fast_chunk = emb[:, :, slow_chunk.size(2):]
+                #print(fast_chunk.shape)
+                #print(slow_chunk.shape)
 
+                slow_chunk = slow_chunk.transpose(1,2)
                 a, b = pl_module.slow_branch(slow_chunk.to(pl_module.device))
                 fake = pl_module.decoder(fast_chunk.to(pl_module.device), (a.to(pl_module.device), b.to(pl_module.device)))
+                #print(fake.shape)
+
+                x_fast = x_fast.squeeze(1)
                 
                 torchaudio.save(
                     os.path.join(path_dir, f'sample_{i}_fake.wav'),

@@ -2,19 +2,31 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
+from .blocks import ConvNeXt
+from torch.nn.utils.parametrizations import weight_norm
 
-class Naive_SlowBranch(nn.Module):
-    def __init__(self, latent_dim, film_dim):
-        super().__init__() 
-        self.gru = nn.GRU(latent_dim, 128, num_layers=4, 
-                          batch_first=True, bidirectional=True)
-        self.proj = nn.Linear(256, film_dim * 2)  # *2 pour α et β
-    
-    def forward(self, latents):  # latents: (B, 16, latent_dim)
-        out, _ = self.gru(latents)
-        pooled = out.mean(dim=1)       # (B, 256)
-        film_params = self.proj(pooled) # (B, film_dim*2)
-        gamma, beta = film_params.chunk(2, dim=-1)
+class GRU_SlowBranch(nn.Module):
+    def __init__(self, latent_dim, film_dim, hidden_dim=128, num_layers=4):
+        super().__init__()
+        self.gru = nn.GRU(
+            latent_dim,
+            hidden_dim,
+            num_layers=num_layers,
+            batch_first=True,
+            bidirectional=True,
+        )
+        self.attn = nn.Linear(hidden_dim * 2, 1)
+        self.proj = nn.Linear(hidden_dim * 2, film_dim * 2)
+
+        nn.init.zeros_(self.proj.weight)
+        nn.init.zeros_(self.proj.bias)
+
+    def forward(self, latents):
+        out, _ = self.gru(latents)  # (B, T, 2H)
+        weights = torch.softmax(self.attn(out), dim=1)
+        pooled = (out * weights).sum(dim=1)
+
+        gamma, beta = self.proj(pooled).chunk(2, dim=-1)
         return gamma, beta
     
 

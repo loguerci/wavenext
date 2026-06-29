@@ -102,7 +102,8 @@ def main(hparams):
         filename='wavenext-{epoch:02d}-{val_mel_loss:.3f}',
         save_top_k=1,
         mode='min',
-        every_n_epochs=1
+        every_n_epochs=1,
+        save_last=True
     )
 
     logger = TensorBoardLogger(save_dir=config['log_dir'] + f'/{formatted}', name='wavenext')
@@ -118,9 +119,10 @@ def main(hparams):
                       logger=logger,
                       callbacks=[ModelSummary(max_depth=2), checkpoint_callback, audio])
     
-    resume_ckpt = '/home/lois/wavenext/checkpoints/12-06_at_09_16_17/wavenext-epoch=220-val_mel_loss=0.869.ckpt'
+    gru = '/home/lois/wavenext/checkpoints/26-06_at_02_00_08/wavenext-epoch=42-val_mel_loss=2.070.ckpt'
+    tranformer = '/home/lois/wavenext/checkpoints/26-06_at_01_59_43/wavenext-epoch=43-val_mel_loss=1.173.ckpt'
 
-    trainer.fit(model, train_loader, val_loader, ckpt_path=resume_ckpt if config['resume'] else None)
+    trainer.fit(model, train_loader, val_loader, ckpt_path=tranformer if config['resume'] else None)
 
 if __name__ == "__main__":
     # python train.py --config_path config_encodec_24.yaml

@@ -49,11 +49,11 @@ class Cond_Decoder(nn.Module):
         x = x.transpose(1, 2)  # (B, T, dim)
         x = self.norm(x)
         x = x.transpose(1, 2)  # (B, dim, T)
-        x = x * gamma.unsqueeze(-1) + beta.unsqueeze(-1)
+        x * (1 + gamma.unsqueeze(-1)) + beta.unsqueeze(-1)
 
         for block in self.blocks:
             x = block(x)
-            x = x * gamma.unsqueeze(-1) + beta.unsqueeze(-1)
+            x * (1 + gamma.unsqueeze(-1)) + beta.unsqueeze(-1)
 
         x = x.transpose(1, 2)  # (B, T, dim)
         x = self.linear1(x)
